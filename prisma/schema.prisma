@@ -1,0 +1,71 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  clerkId   String   @unique
+  email     String   @unique
+
+  name      String?
+  imageUrl  String?
+
+  subjects  Subject[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+
+  title     String
+  color     String?
+
+  ownerId   String
+  owner     User     @relation(fields: [ownerId], references: [id])
+
+  chapters  Chapter[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+}
+
+model Chapter {
+  id        String   @id @default(cuid())
+
+  title     String
+  order     Int
+
+  subjectId String
+  subject   Subject  @relation(fields: [subjectId], references: [id])
+
+  notes     Note[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([subjectId])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+
+  title     String
+
+  content   Json?
+
+  chapterId String
+  chapter   Chapter  @relation(fields: [chapterId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([chapterId])
+}

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Inkwell Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+  tailwind.config = {
+    darkMode: "class",
+    theme: {
+      extend: {
+        "colors": {
+                "tertiary": "#41423e",
+                "outline-variant": "#c3c8c1",
+                "surface-dim": "#e1d8d4",
+                "secondary-fixed-dim": "#ffb59e",
+                "on-primary-fixed": "#0e1f13",
+                "on-secondary-container": "#77331c",
+                "on-tertiary-fixed-variant": "#474744",
+                "primary-fixed": "#d3e8d5",
+                "surface-container-highest": "#e9e1dc",
+                "on-secondary": "#ffffff",
+                "on-primary-fixed-variant": "#394b3d",
+                "on-secondary-fixed-variant": "#76321c",
+                "inverse-surface": "#34302c",
+                "surface-container": "#f5ece7",
+                "on-primary": "#ffffff",
+                "inverse-primary": "#b7ccb9",
+                "on-error-container": "#93000a",
+                "on-tertiary-container": "#d1d0cb",
+                "primary-container": "#4a5d4e",
+                "surface-tint": "#506354",
+                "outline": "#737872",
+                "background": "#fff8f5",
+                "on-error": "#ffffff",
+                "error-container": "#ffdad6",
+                "surface-container-high": "#efe6e2",
+                "on-primary-container": "#c0d5c2",
+                "surface-container-low": "#fbf2ed",
+                "on-background": "#1e1b18",
+                "secondary-container": "#fd9d7f",
+                "secondary-fixed": "#ffdbd0",
+                "tertiary-fixed": "#e4e2dd",
+                "tertiary-container": "#595955",
+                "surface-variant": "#e9e1dc",
+                "primary-fixed-dim": "#b7ccb9",
+                "surface": "#fff8f5",
+                "on-tertiary": "#ffffff",
+                "on-surface": "#1e1b18",
+                "on-tertiary-fixed": "#1b1c19",
+                "primary": "#334537",
+                "surface-container-lowest": "#ffffff",
+                "inverse-on-surface": "#f8efea",
+                "tertiary-fixed-dim": "#c8c6c2",
+                "surface-bright": "#fff8f5",
+                "secondary": "#944931",
+                "error": "#ba1a1a",
+                "on-surface-variant": "#434843",
+                "on-secondary-fixed": "#3a0b00"
+        },
+        "borderRadius": {
+                "DEFAULT": "1rem",
+                "lg": "2rem",
+                "xl": "3rem",
+                "full": "9999px"
+        },
+        "spacing": {
+                "base": "8px",
+                "xl": "80px",
+                "lg": "48px",
+                "sm": "12px",
+                "md": "24px",
+                "gutter": "24px",
+                "margin-desktop": "64px",
+                "xs": "4px",
+                "margin-mobile": "20px"
+        },
+        "fontFamily": {
+                "label-md": [
+                        "Plus Jakarta Sans"
+                ],
+                "label-sm": [
+                        "Plus Jakarta Sans"
+                ],
+                "display-lg-mobile": [
+                        "Plus Jakarta Sans"
+                ],
+                "display-lg": [
+                        "Plus Jakarta Sans"
+                ],
+                "headline-sm": [
+                        "Plus Jakarta Sans"
+                ],
+                "body-lg": [
+                        "Plus Jakarta Sans"
+                ],
+                "headline-md": [
+                        "Plus Jakarta Sans"
+                ],
+                "body-md": [
+                        "Plus Jakarta Sans"
+                ]
+        },
+        "fontSize": {
+                "label-md": [
+                        "14px",
+                        {
+                                "lineHeight": "1.0",
+                                "letterSpacing": "0.01em",
+                                "fontWeight": "600"
+                        }
+                ],
+                "label-sm": [
+                        "12px",
+                        {
+                                "lineHeight": "1.0",
+                                "fontWeight": "500"
+                        }
+                ],
+                "display-lg-mobile": [
+                        "36px",
+                        {
+                                "lineHeight": "1.2",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "display-lg": [
+                        "48px",
+                        {
+                                "lineHeight": "1.1",
+                                "letterSpacing": "-0.02em",
+                                "fontWeight": "700"
+                        }
+                ],
+                "headline-sm": [
+                        "24px",
+                        {
+                                "lineHeight": "1.3",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-lg": [
+                        "18px",
+                        {
+                                "lineHeight": "1.6",
+                                "fontWeight": "400"
+                        }
+                ],
+                "headline-md": [
+                        "32px",
+                        {
+                                "lineHeight": "1.2",
+                                "fontWeight": "600"
+                        }
+                ],
+                "body-md": [
+                        "16px",
+                        {
+                                "lineHeight": "1.6",
+                                "fontWeight": "400"
+                        }
+                ]
+        }
+},
+    },
+  }
+</script>
+</head>
+<body class="bg-background text-on-background font-body-md h-screen flex overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
+<!-- SideNavBar -->
+<nav class="w-[280px] h-screen hidden md:flex flex-col bg-surface-container-lowest fixed left-0 top-0 bottom-0 z-40 border-r border-surface-container-high">
+<!-- Header -->
+<div class="p-lg flex items-center gap-sm">
+<div class="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-sm">
+<span class="material-symbols-outlined font-bold text-[20px]">ink_pen</span>
+</div>
+<div>
+<h1 class="font-headline-sm text-primary">Inkwell</h1>
+<p class="font-label-sm text-secondary">Technical Workspace</p>
+</div>
+</div>
+<!-- CTA -->
+<div class="px-md mb-lg">
+<button class="w-full bg-primary text-on-primary font-label-md h-12 rounded-full flex items-center justify-center gap-sm hover:bg-surface-tint transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[20px]">add</span>
+                New Note
+            </button>
+</div>
+<!-- Main Tabs -->
+<div class="flex-1 px-sm flex flex-col gap-xs overflow-y-auto">
+<!-- Active Tab -->
+<a class="flex items-center gap-sm px-md py-3 rounded-full text-primary font-bold bg-surface-container transition-transform duration-200" href="#" style="transform: scale(1);">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+                Dashboard
+            </a>
+<a class="flex items-center gap-sm px-md py-3 rounded-full text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">folder_open</span>
+                Subjects
+            </a>
+<a class="flex items-center gap-sm px-md py-3 rounded-full text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">history</span>
+                Recent
+            </a>
+<a class="flex items-center gap-sm px-md py-3 rounded-full text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">smart_toy</span>
+                AI Assistant
+            </a>
+<a class="flex items-center gap-sm px-md py-3 rounded-full text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">settings</span>
+                Settings
+            </a>
+</div>
+<!-- Footer Tabs -->
+<div class="p-sm flex flex-col gap-xs mt-auto pb-lg">
+<a class="flex items-center gap-sm px-md py-3 rounded-full text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">help_outline</span>
+                Help
+            </a>
+<a class="flex items-center gap-sm px-md py-3 rounded-full text-secondary hover:text-on-surface hover:bg-surface-container-low transition-colors duration-200" href="#">
+<span class="material-symbols-outlined">archive</span>
+                Archived
+            </a>
+</div>
+</nav>
+<!-- Main Content Area -->
+<div class="flex-1 md:ml-[280px] flex flex-col h-screen overflow-hidden bg-background">
+<!-- TopNavBar -->
+<header class="flex justify-between items-center w-full px-lg h-24 bg-background z-30 shrink-0">
+<!-- Mobile Brand / Desktop Search -->
+<div class="flex items-center gap-lg">
+<h2 class="md:hidden font-headline-sm text-primary">Inkwell</h2>
+<!-- Search Bar -->
+<div class="hidden md:flex items-center relative w-72 group">
+<span class="material-symbols-outlined absolute left-4 text-secondary text-[20px] group-focus-within:text-primary transition-colors">search</span>
+<input class="w-full h-12 pl-12 pr-14 rounded-full bg-surface-container-lowest focus:bg-surface-container-lowest focus:ring-2 focus:ring-primary/20 text-on-surface placeholder:text-outline font-body-md transition-all outline-none shadow-[0_2px_8px_rgba(0,0,0,0.02)] border-none" placeholder="Search notes..." type="text"/>
+<div class="absolute right-3 flex items-center gap-1">
+<kbd class="font-label-sm text-outline bg-surface-container-low px-1.5 py-0.5 rounded-md">⌘</kbd>
+<kbd class="font-label-sm text-outline bg-surface-container-low px-1.5 py-0.5 rounded-md">K</kbd>
+</div>
+</div>
+</div>
+<!-- Desktop Nav Links (Optional context) -->
+<nav class="hidden lg:flex items-center gap-lg">
+<a class="font-label-md text-on-surface-variant hover:text-primary transition-colors" href="#">Notes</a>
+<a class="font-label-md text-on-surface-variant hover:text-primary transition-colors" href="#">Drafts</a>
+<a class="font-label-md text-on-surface-variant hover:text-primary transition-colors" href="#">Shared</a>
+</nav>
+<!-- Trailing Actions -->
+<div class="flex items-center gap-sm md:gap-md">
+<button class="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors md:hidden">
+<span class="material-symbols-outlined">search</span>
+</button>
+<button class="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-background"></span>
+</button>
+<button class="w-10 h-10 rounded-full overflow-hidden shadow-sm hover:shadow-md transition-shadow focus:outline-none focus:ring-2 focus:ring-primary/20">
+<img alt="User Avatar" class="w-full h-full object-cover" data-alt="A close-up portrait of a professional individual in a minimalist, tech-focused setting. The lighting is soft and neutral, enhancing a clean, modern aesthetic with sharp details. The background is a subtle, out-of-focus light gray, emphasizing a clean, high-utility workspace vibe." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCJ41GHxMEbb4j2ETMxPnmi0zU20XrIgS7YHQUtgvySU7C6I8iCZ9W8QBgIyN3PrqgM6bnTERuE2a3NOOg8OhVr2DUthXoN12D98J__TtTaszX3kVdb4D_L6rQakrkAeA_vpjSKQpyCsjTfW06waG1pAnA993tdekvjvJNIcuVlUKCS-nyUXN2Wv9CmT5d9avBjZQDFhQKDbqF6OYsPMECvPmVO3d6QGXU6VuGkb20SewO54Wkg5h5hnCJoYIqQjPDEpDfMVMJu6Rz8"/>
+</button>
+</div>
+</header>
+<!-- Canvas -->
+<main class="flex-1 overflow-y-auto px-md md:px-lg xl:px-margin-desktop pb-xl w-full max-w-[1200px] mx-auto">
+<div class="mb-lg">
+<h2 class="font-display-lg text-primary mb-sm">Good morning, Alex.</h2>
+<p class="font-body-lg text-secondary">Here's a look at your current workspace.</p>
+</div>
+<!-- Subjects Bento Grid -->
+<section class="mb-xl">
+<div class="flex items-center justify-between mb-md">
+<h3 class="font-headline-md text-on-surface">Active Subjects</h3>
+<button class="font-label-md text-primary hover:text-surface-tint flex items-center gap-xs">
+                        View All <span class="material-symbols-outlined text-[16px]">arrow_forward</span>
+</button>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-md">
+<!-- Subject Card 1 -->
+<div class="bg-surface-container-lowest rounded-2xl p-md shadow-[0_4px_24px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all cursor-pointer group flex flex-col h-48 border border-surface-container-lowest hover:border-surface-container-high">
+<div class="flex justify-between items-start mb-auto">
+<div class="w-12 h-12 rounded-full bg-primary-fixed flex items-center justify-center text-on-primary-fixed group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined">calculate</span>
+</div>
+<span class="font-label-sm px-3 py-1 bg-surface-container rounded-full text-secondary flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-primary-fixed-dim"></span>
+                                Mathematics
+                            </span>
+</div>
+<div>
+<h4 class="font-headline-sm text-on-surface mb-xs">Advanced Calculus</h4>
+<p class="font-label-md text-secondary">Last edited 2h ago</p>
+</div>
+</div>
+<!-- Subject Card 2 -->
+<div class="bg-surface-container-lowest rounded-2xl p-md shadow-[0_4px_24px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all cursor-pointer group flex flex-col h-48 border border-surface-container-lowest hover:border-surface-container-high">
+<div class="flex justify-between items-start mb-auto">
+<div class="w-12 h-12 rounded-full bg-secondary-fixed flex items-center justify-center text-on-secondary-fixed group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined">terminal</span>
+</div>
+<span class="font-label-sm px-3 py-1 bg-surface-container rounded-full text-secondary flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-secondary-fixed-dim"></span>
+                                Comp Sci
+                            </span>
+</div>
+<div>
+<h4 class="font-headline-sm text-on-surface mb-xs">Data Structures</h4>
+<p class="font-label-md text-secondary">14 notes • Last edited yesterday</p>
+</div>
+</div>
+<!-- Subject Card 3 -->
+<div class="bg-surface-container-lowest rounded-2xl p-md shadow-[0_4px_24px_rgba(0,0,0,0.02)] hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all cursor-pointer group flex flex-col h-48 border border-surface-container-lowest hover:border-surface-container-high">
+<div class="flex justify-between items-start mb-auto">
+<div class="w-12 h-12 rounded-full bg-tertiary-fixed flex items-center justify-center text-on-tertiary-fixed group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined">auto_stories</span>
+</div>
+<span class="font-label-sm px-3 py-1 bg-surface-container rounded-full text-secondary flex items-center gap-xs">
+<span class="w-2 h-2 rounded-full bg-tertiary-fixed-dim"></span>
+                                Literature
+                            </span>
+</div>
+<div>
+<h4 class="font-headline-sm text-on-surface mb-xs">Modernist Poetry</h4>
+<p class="font-label-md text-secondary">3 notes • Last edited 3d ago</p>
+</div>
+</div>
+</div>
+</section>
+<!-- Recent Notes List -->
+<section class="mb-xl">
+<div class="flex items-center justify-between mb-md">
+<h3 class="font-headline-md text-on-surface">Recent Notes</h3>
+</div>
+<div class="bg-surface-container-lowest rounded-2xl p-sm shadow-[0_4px_24px_rgba(0,0,0,0.02)]">
+<!-- List Header -->
+<div class="hidden sm:grid grid-cols-12 gap-sm px-md py-sm font-label-sm text-outline uppercase tracking-wider mb-sm">
+<div class="col-span-6">Title</div>
+<div class="col-span-3">Subject</div>
+<div class="col-span-3 text-right">Last Modified</div>
+</div>
+<!-- List Items -->
+<div class="flex flex-col gap-xs">
+<!-- Item 1 -->
+<a class="grid grid-cols-1 sm:grid-cols-12 gap-y-2 gap-x-sm px-md py-3 items-center hover:bg-surface-container-low transition-colors group rounded-xl" href="#">
+<div class="col-span-1 sm:col-span-6 flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-secondary text-[18px]">description</span>
+</div>
+<span class="font-body-md font-medium text-on-surface">Integration by Parts Examples</span>
+</div>
+<div class="col-span-1 sm:col-span-3">
+<span class="font-label-sm px-3 py-1 bg-primary-fixed text-on-primary-fixed rounded-full">Mathematics</span>
+</div>
+<div class="col-span-1 sm:col-span-3 font-label-md text-secondary sm:text-right">
+                                2 hours ago
+                            </div>
+</a>
+<!-- Item 2 -->
+<a class="grid grid-cols-1 sm:grid-cols-12 gap-y-2 gap-x-sm px-md py-3 items-center hover:bg-surface-container-low transition-colors group rounded-xl" href="#">
+<div class="col-span-1 sm:col-span-6 flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-secondary text-[18px]">description</span>
+</div>
+<span class="font-body-md font-medium text-on-surface">Binary Search Tree Implementation</span>
+</div>
+<div class="col-span-1 sm:col-span-3">
+<span class="font-label-sm px-3 py-1 bg-secondary-fixed text-on-secondary-fixed rounded-full">Comp Sci</span>
+</div>
+<div class="col-span-1 sm:col-span-3 font-label-md text-secondary sm:text-right">
+                                Yesterday
+                            </div>
+</a>
+<!-- Item 3 -->
+<a class="grid grid-cols-1 sm:grid-cols-12 gap-y-2 gap-x-sm px-md py-3 items-center hover:bg-surface-container-low transition-colors group rounded-xl" href="#">
+<div class="col-span-1 sm:col-span-6 flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-secondary text-[18px]">description</span>
+</div>
+<span class="font-body-md font-medium text-on-surface">T.S. Eliot 'The Waste Land' Analysis</span>
+</div>
+<div class="col-span-1 sm:col-span-3">
+<span class="font-label-sm px-3 py-1 bg-tertiary-fixed text-on-tertiary-fixed rounded-full">Literature</span>
+</div>
+<div class="col-span-1 sm:col-span-3 font-label-md text-secondary sm:text-right">
+                                Oct 24
+                            </div>
+</a>
+<!-- Item 4 -->
+<a class="grid grid-cols-1 sm:grid-cols-12 gap-y-2 gap-x-sm px-md py-3 items-center hover:bg-surface-container-low transition-colors group rounded-xl" href="#">
+<div class="col-span-1 sm:col-span-6 flex items-center gap-sm">
+<div class="w-8 h-8 rounded-full bg-surface-container flex items-center justify-center group-hover:bg-surface-container-high transition-colors">
+<span class="material-symbols-outlined text-secondary text-[18px]">description</span>
+</div>
+<span class="font-body-md font-medium text-on-surface">Graph Traversal Algorithms (BFS/DFS)</span>
+</div>
+<div class="col-span-1 sm:col-span-3">
+<span class="font-label-sm px-3 py-1 bg-secondary-fixed text-on-secondary-fixed rounded-full">Comp Sci</span>
+</div>
+<div class="col-span-1 sm:col-span-3 font-label-md text-secondary sm:text-right">
+                                Oct 20
+                            </div>
+</a>
+</div>
+</div>
+</section>
+</main>
+</div>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center h-20 bg-surface-container-lowest border-t border-surface-container shadow-[0_-4px_24px_rgba(0,0,0,0.02)] md:hidden pb-2">
+<a class="flex flex-col items-center justify-center text-primary font-bold w-16 h-14 rounded-2xl bg-surface-container-low mt-2" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">home</span>
+<span class="font-label-sm mt-1">Home</span>
+</a>
+<a class="flex flex-col items-center justify-center text-secondary hover:text-on-surface w-16 h-14 rounded-2xl hover:bg-surface-container-low mt-2 transition-colors" href="#">
+<span class="material-symbols-outlined">book</span>
+<span class="font-label-sm mt-1">Subjects</span>
+</a>
+<a class="flex flex-col items-center justify-center text-secondary hover:text-on-surface w-16 h-14 rounded-2xl hover:bg-surface-container-low mt-2 transition-colors" href="#">
+<span class="material-symbols-outlined">search</span>
+<span class="font-label-sm mt-1">Search</span>
+</a>
+<a class="flex flex-col items-center justify-center text-secondary hover:text-on-surface w-16 h-14 rounded-2xl hover:bg-surface-container-low mt-2 transition-colors" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-label-sm mt-1">Settings</span>
+</a>
+</nav>
+</body></html>
