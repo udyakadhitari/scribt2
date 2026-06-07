@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { SignInButton, Show, UserButton } from "@clerk/nextjs";
 
 export default function Home() {
   return (
@@ -26,11 +27,16 @@ export default function Home() {
           <span className="material-symbols-outlined hover:text-primary transition-colors cursor-pointer" style={{ fontVariationSettings: "'FILL' 0" }}>
             settings
           </span>
-          <img
-            alt="User profile avatar"
-            className="w-8 h-8 rounded-full ml-sm object-cover shadow-sm"
-            src="https://lh3.googleusercontent.com/aida-public/AB6AXuAK9MFpYFfCEwMe9ySecm8wfYqH8mIrnsD3KLTzOhgb04FbdlVpGC9b0U6jRgMrGXp3KVV4SpEQEAPGTPUR3JV6zLzn1-AjJp7uhuX9AqBMJAV3weHQs_a9jEZ_WphhhH621FR0Z__orUDnBx710Vd5D7S8tIxXrAWXGHQh8bHzb5d4RX-83ANOSAOwmOljVnNg06OjJZcRtynZnBRvTQt0cNPiuro5za_3P1XApcoASbV2Gn4vGF6mW0LDweY1JnQa91egCkC1j-4J"
-          />
+          <Show when="signed-in">
+            <UserButton />
+          </Show>
+          <Show when="signed-out">
+            <SignInButton mode="modal">
+              <button className="bg-primary text-on-primary rounded-full px-4 py-1.5 font-label-md hover:bg-surface-tint transition-all cursor-pointer">
+                Sign In
+              </button>
+            </SignInButton>
+          </Show>
         </div>
       </nav>
 

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
+import { UserButton } from "@clerk/nextjs";
 
 interface ChatMessage {
   sender: "ai" | "user";
@@ -288,6 +289,9 @@ export default function EditorPage() {
             >
               <span className="material-symbols-outlined">smart_toy</span>
             </button>
+            <div className="w-8 h-8 flex items-center justify-center">
+              <UserButton />
+            </div>
           </div>
         </header>
 

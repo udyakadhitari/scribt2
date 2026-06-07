@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
 }
 
 datasource db {
@@ -15,6 +16,7 @@ model User {
   imageUrl  String?
 
   subjects  Subject[]
+  journalEntries JournalEntry[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -64,8 +66,51 @@ model Note {
   chapterId String
   chapter   Chapter  @relation(fields: [chapterId], references: [id])
 
+  chats     NoteChat[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([chapterId])
+}
+
+model NoteChat {
+  id        String   @id @default(cuid())
+
+  noteId    String
+  note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  role      ChatRole
+
+  content   String   @db.Text
+
+  createdAt DateTime @default(now())
+
+  @@index([noteId])
+}
+
+enum ChatRole {
+  USER
+  ASSISTANT
+}
+
+model JournalEntry {
+  id          String   @id @default(cuid())
+
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title       String?
+
+  content     Json
+
+  mood        String?
+
+  createdAt   DateTime @default(now())
+
+  date        DateTime
+
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
 }
