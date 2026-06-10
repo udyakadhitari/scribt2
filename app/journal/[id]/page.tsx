@@ -20,9 +20,14 @@ export default async function JournalEntryPage({ params }: PageProps) {
     where: { id },
   });
 
-  // Verify ownership
-  if (!entry || entry.userId !== dbUser.id) {
+  // Verify entry exists
+  if (!entry) {
     notFound();
+  }
+
+  // Verify ownership
+  if (entry.userId !== dbUser.id) {
+    redirect("/forbidden");
   }
 
   // Format data for client component

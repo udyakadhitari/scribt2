@@ -39,10 +39,25 @@ export default async function NotePage({ params }: PageProps) {
     },
   });
 
-  // Verify ownership
-  if (!note || note.chapter?.subject?.ownerId !== dbUser.id) {
+  // Verify note exists
+  if (!note) {
     notFound();
   }
+
+  // Verify ownership or collaborator access
+  const isOwner = note.chapter?.subject?.ownerId === dbUser.id;
+  const collaborator = await prisma.collaborator.findFirst({
+    where: {
+      noteId: id,
+      userId: dbUser.id,
+    },
+  });
+
+  if (!isOwner && !collaborator) {
+    redirect("/forbidden");
+  }
+
+  const activeRole = isOwner ? "EDIT" : (collaborator?.role || "VIEW");
 
   // Fetch comments to pass down
   const comments = await prisma.comment.findMany({
@@ -71,7 +86,7 @@ console.log("NOTE CONTENT:", note.content);
           content: c.content,
         })) || [],
       }}
-      initialRole="EDIT"
+      initialRole={activeRole}
       initialComments={comments.map((c: any) => ({
         id: c.id,
         content: c.content,

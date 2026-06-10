@@ -34,9 +34,14 @@ export default async function SubjectPage({ params }: PageProps) {
     },
   });
 
-  // Verify ownership
-  if (!subject || subject.ownerId !== dbUser.id) {
+  // Verify subject exists
+  if (!subject) {
     notFound();
+  }
+
+  // Verify ownership
+  if (subject.ownerId !== dbUser.id) {
+    redirect("/forbidden");
   }
 
   return (
