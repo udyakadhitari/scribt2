@@ -13,6 +13,8 @@ interface SidebarProps {
     title: string;
   };
   activeChapterTitle?: string;
+  isShared?: boolean;
+  sharedNoteTitle?: string;
 }
 
 export default function Sidebar({
@@ -21,6 +23,8 @@ export default function Sidebar({
   onTabChange,
   activeSubject,
   activeChapterTitle,
+  isShared = false,
+  sharedNoteTitle,
 }: SidebarProps) {
   const router = useRouter();
 
@@ -93,7 +97,7 @@ export default function Sidebar({
         </Link>
 
         {/* Dynamic Context: Active Subject & Chapter nested under Subjects */}
-        {activeSubject && (
+        {!isShared && activeSubject && (
           <div className="flex flex-col gap-xs my-xs pl-sm border-l border-outline-variant/30 ml-md">
             <Link
               href={`/subject/${activeSubject.id}`}
@@ -113,6 +117,16 @@ export default function Sidebar({
                 <span className="font-body-xs truncate text-xs w-full italic">{activeChapterTitle}</span>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Shared Note Tab */}
+        {isShared && sharedNoteTitle && (
+          <div className="flex flex-col gap-xs my-xs pl-sm border-l border-outline-variant/30 ml-md">
+            <div className="flex items-center gap-md pl-6 pr-md py-2 rounded-full outline-none text-primary font-bold bg-surface-container-low select-none">
+              <span className="material-symbols-outlined text-[20px] fill">description</span>
+              <span className="font-body-sm truncate text-sm w-full">{sharedNoteTitle}</span>
+            </div>
           </div>
         )}
 

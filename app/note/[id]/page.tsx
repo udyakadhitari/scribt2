@@ -21,10 +21,17 @@ export default async function NotePage({ params }: PageProps) {
     include: {
       chapter: {
         include: {
-          subject: true,
+          subject: {
+            include: {
+              owner: true,
+            },
+          },
         },
       },
       chats: {
+        where: {
+          userId: dbUser.id,
+        },
         orderBy: {
           createdAt: "asc",
         },
@@ -33,25 +40,51 @@ export default async function NotePage({ params }: PageProps) {
   });
 
   // Verify ownership
-  if (!note || note.chapter.subject.ownerId !== dbUser.id) {
+  if (!note || note.chapter?.subject?.ownerId !== dbUser.id) {
     notFound();
   }
 
+  // Fetch comments to pass down
+  const comments = await prisma.comment.findMany({
+    where: { noteId: note.id, resolved: false },
+    include: {
+      user: true,
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+console.log("NOTE CONTENT:", note.content);
   // Convert prisma note object to ensure serializable fields if needed
   return (
     <NoteEditorClient
+      key={note.id}
       note={{
         id: note.id,
         title: note.title,
         content: note.content,
-        chapterTitle: note.chapter.title,
-        subjectTitle: note.chapter.subject.title,
-        subjectId: note.chapter.subject.id,
-        chats: note.chats.map((c) => ({
+        chapterTitle: note.chapter?.title || "Untitled Chapter",
+        subjectTitle: note.chapter?.subject?.title || "Untitled Subject",
+        subjectId: note.chapter?.subject?.id || "",
+        chats: note.chats?.map((c) => ({
           role: c.role,
           content: c.content,
-        })),
+        })) || [],
       }}
+      initialRole="EDIT"
+      initialComments={comments.map((c: any) => ({
+        id: c.id,
+        content: c.content,
+        resolved: c.resolved,
+        createdAt: c.createdAt.toISOString(),
+        user: {
+          name: c.user.name || "Collaborator",
+          imageUrl: c.user.imageUrl || null,
+        }
+      }))}
+      ownerName={note.chapter?.subject?.owner?.name || "Owner"}
+      ownerImageUrl={note.chapter?.subject?.owner?.imageUrl || null}
+      ownerClerkId={note.chapter?.subject?.owner?.clerkId || ""}
     />
   );
 }

@@ -81,6 +81,7 @@ export default function JournalEditorClient({ userName, entry }: JournalEditorPr
 
   // Instantiating Tiptap Editor
   const editor = useEditor({
+    immediatelyRender: false,
     extensions,
     content: entry.content?.html || "",
     editorProps: {

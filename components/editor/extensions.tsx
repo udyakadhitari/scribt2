@@ -1,5 +1,5 @@
 import StarterKit from "@tiptap/starter-kit";
-import { NodeSelection } from "prosemirror-state";
+import { NodeSelection, TextSelection, Selection } from "prosemirror-state";
 import { Extension, InputRule, Mark, mergeAttributes } from "@tiptap/core";
 import Highlight from "@tiptap/extension-highlight";
 import Color from "@tiptap/extension-color";
@@ -19,6 +19,172 @@ import toast from "react-hot-toast";
 import Subscript from "@tiptap/extension-subscript";
 import Superscript from "@tiptap/extension-superscript";
 import { GrammarChecker } from "./grammar";
+
+declare module "@tiptap/core" {
+  interface Commands<ReturnType> {
+    keyboardShortcuts: {
+      moveLineUp: () => ReturnType;
+      moveLineDown: () => ReturnType;
+      duplicateLineUp: () => ReturnType;
+      duplicateLineDown: () => ReturnType;
+    };
+  }
+}
+
+export const KeyboardShortcutsExtension = Extension.create({
+  name: "keyboardShortcuts",
+
+  addCommands() {
+    return {
+      moveLineUp: () => ({ state, dispatch }) => {
+        const { selection, doc } = state;
+        const { $from, $to } = selection;
+        const range = $from.blockRange($to);
+        if (!range) return false;
+
+        const { start, end, parent } = range;
+        const indexBefore = range.startIndex;
+        if (indexBefore === 0) return false;
+
+        const prevSibling = parent.child(indexBefore - 1);
+        const prevSiblingSize = prevSibling.nodeSize;
+
+        if (dispatch) {
+          const slice = doc.slice(start, end);
+          const tr = state.tr;
+          tr.delete(start, end);
+          tr.insert(start - prevSiblingSize, slice.content);
+
+          const offset = -prevSiblingSize;
+          const newFrom = $from.pos + offset;
+          const newTo = $to.pos + offset;
+          const resolvedFrom = Math.max(0, Math.min(tr.doc.content.size, newFrom));
+          const resolvedTo = Math.max(0, Math.min(tr.doc.content.size, newTo));
+
+          let newSel;
+          if (selection instanceof TextSelection) {
+            newSel = TextSelection.create(tr.doc, resolvedFrom, resolvedTo);
+          } else {
+            newSel = Selection.near(tr.doc.resolve(resolvedFrom));
+          }
+          tr.setSelection(newSel);
+          tr.scrollIntoView();
+          dispatch(tr);
+        }
+        return true;
+      },
+
+      moveLineDown: () => ({ state, dispatch }) => {
+        const { selection, doc } = state;
+        const { $from, $to } = selection;
+        const range = $from.blockRange($to);
+        if (!range) return false;
+
+        const { start, end, parent } = range;
+        const indexAfter = range.endIndex;
+        if (indexAfter >= parent.childCount) return false;
+
+        const nextSibling = parent.child(indexAfter);
+        const nextSiblingSize = nextSibling.nodeSize;
+
+        if (dispatch) {
+          const slice = doc.slice(start, end);
+          const tr = state.tr;
+          tr.delete(start, end);
+          tr.insert(start + nextSiblingSize, slice.content);
+
+          const offset = nextSiblingSize;
+          const newFrom = $from.pos + offset;
+          const newTo = $to.pos + offset;
+          const resolvedFrom = Math.max(0, Math.min(tr.doc.content.size, newFrom));
+          const resolvedTo = Math.max(0, Math.min(tr.doc.content.size, newTo));
+
+          let newSel;
+          if (selection instanceof TextSelection) {
+            newSel = TextSelection.create(tr.doc, resolvedFrom, resolvedTo);
+          } else {
+            newSel = Selection.near(tr.doc.resolve(resolvedFrom));
+          }
+          tr.setSelection(newSel);
+          tr.scrollIntoView();
+          dispatch(tr);
+        }
+        return true;
+      },
+
+      duplicateLineUp: () => ({ state, dispatch }) => {
+        const { selection, doc } = state;
+        const { $from, $to } = selection;
+        const range = $from.blockRange($to);
+        if (!range) return false;
+
+        const { start, end } = range;
+
+        if (dispatch) {
+          const slice = doc.slice(start, end);
+          const tr = state.tr;
+          tr.insert(start, slice.content);
+
+          const resolvedFrom = Math.max(0, Math.min(tr.doc.content.size, $from.pos));
+          const resolvedTo = Math.max(0, Math.min(tr.doc.content.size, $to.pos));
+
+          let newSel;
+          if (selection instanceof TextSelection) {
+            newSel = TextSelection.create(tr.doc, resolvedFrom, resolvedTo);
+          } else {
+            newSel = Selection.near(tr.doc.resolve(resolvedFrom));
+          }
+          tr.setSelection(newSel);
+          tr.scrollIntoView();
+          dispatch(tr);
+        }
+        return true;
+      },
+
+      duplicateLineDown: () => ({ state, dispatch }) => {
+        const { selection, doc } = state;
+        const { $from, $to } = selection;
+        const range = $from.blockRange($to);
+        if (!range) return false;
+
+        const { start, end } = range;
+
+        if (dispatch) {
+          const slice = doc.slice(start, end);
+          const tr = state.tr;
+          tr.insert(end, slice.content);
+
+          const offset = end - start;
+          const newFrom = $from.pos + offset;
+          const newTo = $to.pos + offset;
+          const resolvedFrom = Math.max(0, Math.min(tr.doc.content.size, newFrom));
+          const resolvedTo = Math.max(0, Math.min(tr.doc.content.size, newTo));
+
+          let newSel;
+          if (selection instanceof TextSelection) {
+            newSel = TextSelection.create(tr.doc, resolvedFrom, resolvedTo);
+          } else {
+            newSel = Selection.near(tr.doc.resolve(resolvedFrom));
+          }
+          tr.setSelection(newSel);
+          tr.scrollIntoView();
+          dispatch(tr);
+        }
+        return true;
+      },
+    };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      "Alt-ArrowUp": () => this.editor.commands.moveLineUp(),
+      "Alt-ArrowDown": () => this.editor.commands.moveLineDown(),
+      "Alt-Shift-ArrowUp": () => this.editor.commands.duplicateLineUp(),
+      "Alt-Shift-ArrowDown": () => this.editor.commands.duplicateLineDown(),
+    };
+  },
+});
+
 
 // Custom Resizable Image Node View
 export const ResizableImage = Image.extend({
@@ -648,5 +814,6 @@ export const extensions = [
   HeartEmojiExtension,
   Subscript,
   Superscript,
+  KeyboardShortcutsExtension,
   GrammarChecker,
 ];

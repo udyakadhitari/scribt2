@@ -41,25 +41,64 @@ export async function GET(req: NextRequest) {
       orderBy: { updatedAt: "desc" },
     });
 
-    // 2. Search existing notes matching query using FTS
-    const notes = await prisma.note.findMany({
-      where: {
+    // 2. Search existing notes matching query — title FTS + content text search
+    // First: FTS on title
+    const notesByTitle = ftsQuery
+      ? await prisma.note.findMany({
+          where: {
+            chapter: { subject: { ownerId: dbUser.id } },
+            title: { search: ftsQuery },
+          },
+          include: { chapter: { include: { subject: true } } },
+          orderBy: { updatedAt: "desc" },
+        })
+      : [];
+
+    // Second: case-insensitive substring search on the JSON content column
+    // We cast the JSON content to text and do an ILIKE search
+    const notesByContent = cleanQuery
+      ? await prisma.$queryRaw<any[]>`
+          SELECT n.id, n.title, n.content, n."chapterId", n."createdAt", n."updatedAt",
+                 c.id AS chid, c.title AS ctitle, c."subjectId",
+                 s.id AS sid, s.title AS stitle, s.color AS scolor, s."ownerId"
+          FROM "Note" n
+          JOIN "Chapter" c ON n."chapterId" = c.id
+          JOIN "Subject" s ON c."subjectId" = s.id
+          WHERE s."ownerId" = ${dbUser.id}
+            AND (
+              n.content->>'html' ILIKE ${'%' + cleanQuery + '%'}
+              OR n.content->>'heading' ILIKE ${'%' + cleanQuery + '%'}
+            )
+          ORDER BY n."updatedAt" DESC
+          LIMIT 20
+        `
+      : [];
+
+    // Merge and deduplicate by note ID — title matches first
+    const seenIds = new Set<string>(notesByTitle.map((n: any) => n.id));
+    const notesByContentFormatted = notesByContent
+      .filter((row: any) => !seenIds.has(row.id))
+      .map((row: any) => ({
+        id: row.id,
+        title: row.title,
+        content: row.content,
+        chapterId: row.chapterId || row.chapterid,
+        createdAt: row.createdAt || row.createdat,
+        updatedAt: row.updatedAt || row.updatedat,
         chapter: {
+          id: row.chid,
+          title: row.ctitle,
+          subjectId: row.subjectId || row.subjectid,
           subject: {
-            ownerId: dbUser.id,
+            id: row.sid,
+            title: row.stitle,
+            color: row.scolor,
+            ownerId: row.ownerId || row.ownerid,
           },
         },
-        title: ftsQuery ? { search: ftsQuery } : undefined,
-      },
-      include: {
-        chapter: {
-          include: {
-            subject: true,
-          },
-        },
-      },
-      orderBy: { updatedAt: "desc" },
-    });
+      }));
+
+    const notes = [...notesByTitle, ...notesByContentFormatted];
 
     // 2.5. Search existing chapters matching query using FTS
     const chapters = await prisma.chapter.findMany({
@@ -75,96 +114,8 @@ export async function GET(req: NextRequest) {
       orderBy: { updatedAt: "desc" },
     });
 
-    // 3. Store note if it doesn't exist (simultaneous search-and-store)
-    // We only create it if the query is at least 2 characters to avoid creating notes for tiny single-char typing,
-    // and if there's no exact matching note title.
-    if (cleanQuery.length >= 2) {
-      const exactNoteExists = await prisma.note.findFirst({
-        where: {
-          chapter: {
-            subject: {
-              ownerId: dbUser.id,
-            },
-          },
-          title: { equals: cleanQuery, mode: "insensitive" },
-        },
-      });
 
-      if (!exactNoteExists) {
-        // Find user's first available chapter
-        let targetChapter = await prisma.chapter.findFirst({
-          where: {
-            subject: {
-              ownerId: dbUser.id,
-            },
-          },
-          include: {
-            subject: true,
-          },
-        });
 
-        // If no chapter exists, we'll create a default Subject & Chapter
-        if (!targetChapter) {
-          let defaultSubject = await prisma.subject.findFirst({
-            where: {
-              ownerId: dbUser.id,
-              title: "General",
-            },
-          });
-
-          if (!defaultSubject) {
-            defaultSubject = await prisma.subject.create({
-              data: {
-                title: "General",
-                color: "bg-primary-fixed",
-                ownerId: dbUser.id,
-              },
-            });
-          }
-
-          let defaultChapter = await prisma.chapter.findFirst({
-            where: {
-              subjectId: defaultSubject.id,
-              title: "General Notes",
-            },
-          });
-
-          if (!defaultChapter) {
-            defaultChapter = await prisma.chapter.create({
-              data: {
-                title: "General Notes",
-                order: 1,
-                subjectId: defaultSubject.id,
-              },
-            });
-          }
-
-          targetChapter = {
-            ...defaultChapter,
-            subject: defaultSubject,
-          };
-        }
-
-        // Create the note
-        const newNote = await prisma.note.create({
-          data: {
-            title: cleanQuery,
-            chapterId: targetChapter.id,
-            content: { type: "doc", content: [] },
-          },
-          include: {
-            chapter: {
-              include: {
-                subject: true,
-              },
-            },
-          },
-        });
-
-        // Add to search results list
-        notes.unshift(newNote);
-      }
-    }
 
     // Format the response to match the frontend expected schemas
     const formattedSubjects = subjects.map((subj) => {

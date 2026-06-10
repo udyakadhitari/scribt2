@@ -17,6 +17,9 @@ model User {
 
   subjects  Subject[]
   journalEntries JournalEntry[]
+  collaborators Collaborator[]
+  comments      Comment[]
+  noteChats     NoteChat[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -67,6 +70,8 @@ model Note {
   chapter   Chapter  @relation(fields: [chapterId], references: [id])
 
   chats     NoteChat[]
+  collaborators Collaborator[]
+  comments      Comment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -80,6 +85,9 @@ model NoteChat {
   noteId    String
   note      Note     @relation(fields: [noteId], references: [id], onDelete: Cascade)
 
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   role      ChatRole
 
   content   String   @db.Text
@@ -87,6 +95,7 @@ model NoteChat {
   createdAt DateTime @default(now())
 
   @@index([noteId])
+  @@index([userId])
 }
 
 enum ChatRole {
@@ -112,5 +121,73 @@ model JournalEntry {
 
   updatedAt   DateTime @updatedAt
 
+  @@index([userId])
+}
+
+enum ResourceType {
+  NOTE
+  CHAPTER
+  SUBJECT
+}
+
+enum Permission {
+  VIEW
+  COMMENT
+  EDIT
+}
+
+model ShareLink {
+  id          String   @id @default(cuid())
+
+  token       String   @unique
+
+  resourceId  String
+
+  resourceType ResourceType
+
+  permission  Permission
+
+  expiresAt   DateTime?
+
+  createdBy   String
+
+  createdAt   DateTime @default(now())
+}
+
+model Collaborator {
+  id          String @id @default(cuid())
+
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  noteId      String
+  note        Note   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  role        Permission
+
+  invitedBy   String
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([noteId])
+}
+
+model Comment {
+  id          String @id @default(cuid())
+
+  noteId      String
+  note        Note   @relation(fields: [noteId], references: [id], onDelete: Cascade)
+
+  userId      String
+  user        User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  content     String
+
+  resolved    Boolean @default(false)
+
+  createdAt   DateTime @default(now())
+
+  @@index([noteId])
   @@index([userId])
 }

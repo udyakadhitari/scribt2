@@ -1,10 +1,25 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { io, Socket } from "socket.io-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
-import { updateNoteContent, deleteNote, saveChatMessage, checkGrammar } from "@/lib/actions";
+import { UserButton, useUser } from "@clerk/nextjs";
+import {
+  updateNoteContent,
+  deleteNote,
+  saveChatMessage,
+  checkGrammar,
+  createShareLink,
+  deleteShareLink,
+  getShareLinks,
+  addComment,
+  resolveComment,
+  getCollaborators,
+  copySharedNote,
+  updateCollaboratorRole,
+  removeCollaborator
+} from "@/lib/actions";
 import toast from "react-hot-toast";
 import { useEditor } from "@tiptap/react";
 import Sidebar from "@/components/Sidebar";
@@ -15,6 +30,13 @@ import TiptapEditor from "@/components/editor/editor";
 import { slashCommandsList } from "@/components/editor/suggestions";
 import { NodeSelection, TextSelection } from "prosemirror-state";
 import { EMOJI_CATEGORIES, SPECIAL_CHAR_CATEGORIES } from "@/components/editor/symbols";
+import * as Y from "yjs";
+import { Awareness } from "y-protocols/awareness";
+import * as awarenessProtocol from "y-protocols/awareness";
+import Collaboration from "@tiptap/extension-collaboration";
+import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
+import { yCursorPlugin } from "@tiptap/y-tiptap";
+
 
 interface ChatMessage {
   sender: "ai" | "user";
@@ -49,9 +71,295 @@ interface NoteData {
   chats: NoteChatData[];
 }
 
-export default function NoteEditorClient({ note }: { note: NoteData }) {
+interface CommentData {
+  id: string;
+  content: string;
+  resolved: boolean;
+  createdAt: string;
+  user: {
+    name: string;
+    imageUrl: string | null;
+  };
+}
+
+const CURSOR_COLORS = [
+  "#f44336", "#e91e63", "#9c27b0", "#673ab7", "#3f51b5",
+  "#2196f3", "#03a9f4", "#00bcd4", "#009688", "#4caf50",
+  "#8bc34a", "#cddc39", "#ffeb3b", "#ffc107", "#ff9800",
+  "#ff5722", "#795548", "#607d8b"
+];
+
+function getCursorColor(userId?: string) {
+  if (!userId) return "#334537"; // default primary color
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % CURSOR_COLORS.length;
+  return CURSOR_COLORS[index];
+}
+
+const CustomCollaborationCursor = CollaborationCursor.extend({
+  addProseMirrorPlugins() {
+    return [
+      yCursorPlugin(
+        (() => {
+          this.options.provider.awareness.setLocalStateField("user", this.options.user);
+
+          const statesToArray = (states: Map<number, any>) => {
+            return Array.from(states.entries()).map(([key, value]) => ({
+              clientId: key,
+              ...value.user,
+            }));
+          };
+
+          this.storage.users = statesToArray(this.options.provider.awareness.states);
+
+          this.options.provider.awareness.on("update", () => {
+            this.storage.users = statesToArray(this.options.provider.awareness.states);
+          });
+
+          return this.options.provider.awareness;
+        })(),
+        // @ts-ignore
+        {
+          cursorBuilder: this.options.render,
+          selectionBuilder: this.options.selectionRender,
+        }
+      ),
+    ];
+  },
+});
+
+export default function NoteEditorClient({
+  note,
+  initialRole = "EDIT",
+  initialComments = [],
+  isOwner = true,
+  isShared = false,
+  authorName,
+  ownerName = "Owner",
+  ownerImageUrl = null,
+  ownerClerkId,
+}: {
+  note: NoteData;
+  initialRole?: "VIEW" | "COMMENT" | "EDIT";
+  initialComments?: CommentData[];
+  isOwner?: boolean;
+  isShared?: boolean;
+  authorName?: string;
+  ownerName?: string;
+  ownerImageUrl?: string | null;
+  ownerClerkId?: string;
+}) {
   const router = useRouter();
-  const [isAiPanelOpen, setIsAiPanelOpen] = useState(true);
+  const { user } = useUser();
+
+  // Yjs and Awareness refs
+  const ydocRef = useRef<Y.Doc | null>(null);
+  const awarenessRef = useRef<any>(null);
+  const needsInitRef = useRef(false);
+  const initialContentRef = useRef(note.content?.html || "");
+
+  if (!ydocRef.current) {
+    ydocRef.current = new Y.Doc();
+    awarenessRef.current = new Awareness(ydocRef.current);
+  }
+
+  const ydoc = ydocRef.current;
+  const awareness = awarenessRef.current;
+  
+  // Collaborative Access Roles & Comments States
+  const [role, setRole] = useState<"VIEW" | "COMMENT" | "EDIT">(initialRole);
+  const roleRef = useRef(role);
+  useEffect(() => {
+    roleRef.current = role;
+  }, [role]);
+  const [comments, setComments] = useState<CommentData[]>(initialComments);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareLinks, setShareLinks] = useState<any[]>([]);
+  const [collaborators, setCollaborators] = useState<any[]>([]);
+  const [isGeneratingLink, setIsGeneratingLink] = useState(false);
+  const [newSharePermission, setNewSharePermission] = useState<"VIEW" | "COMMENT" | "EDIT">("VIEW");
+  const [newShareExpiry, setNewShareExpiry] = useState<string>("");
+  const [isCommentsPanelOpen, setIsCommentsPanelOpen] = useState(initialRole === "COMMENT");
+  const isCommentsPanelOpenRef = useRef(isCommentsPanelOpen);
+  useEffect(() => {
+    isCommentsPanelOpenRef.current = isCommentsPanelOpen;
+  }, [isCommentsPanelOpen]);
+  const [newCommentText, setNewCommentText] = useState("");
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
+  const [unreadCommentCount, setUnreadCommentCount] = useState(0);
+  const [pendingRoles, setPendingRoles] = useState<Record<string, "VIEW" | "COMMENT" | "EDIT">>({});
+  const [isSavingPermissions, setIsSavingPermissions] = useState(false);
+  const [activeUsers, setActiveUsers] = useState<{ id: string; name: string; color: string; imageUrl: string | null }[]>([]);
+  const liveCollaborators = activeUsers.filter((u) => u.id !== ownerClerkId && u.id !== "guest");
+
+  // Sort collaborators to put live ones first
+  const sortedCollaborators = [...collaborators].sort((a, b) => {
+    const aLive = activeUsers.some(u => u.id === a.user.clerkId);
+    const bLive = activeUsers.some(u => u.id === b.user.clerkId);
+    if (aLive && !bLive) return -1;
+    if (!aLive && bLive) return 1;
+    return 0;
+  });
+
+  // Socket.io ref
+  const socketRef = useRef<Socket | null>(null);
+
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  // Connect socket and join note room
+  useEffect(() => {
+    const socket = io({ path: "/api/socketio" });
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      socket.emit("join-note", note.id);
+      socket.emit("sync-room", { noteId: note.id });
+    });
+
+    socket.on("sync-room-response", (data: { empty: boolean; update?: number[] }) => {
+      if (data.empty) {
+        if (editorRef.current) {
+          editorRef.current.commands.setContent(initialContentRef.current, { emitUpdate: false });
+          const update = Y.encodeStateAsUpdate(ydoc);
+          socket.emit("ydoc-update", { noteId: note.id, update: Array.from(update) });
+        } else {
+          needsInitRef.current = true;
+        }
+      } else if (data.update) {
+        Y.applyUpdate(ydoc, new Uint8Array(data.update), "remote");
+      }
+
+      // Listen for local updates
+      ydoc.on("update", (update: Uint8Array, origin: any) => {
+        if (origin !== "remote" && roleRef.current === "EDIT") {
+          socket.emit("ydoc-update", { noteId: note.id, update: Array.from(update) });
+        }
+      });
+    });
+
+    socket.on("ydoc-update", (updateData: number[]) => {
+      Y.applyUpdate(ydoc, new Uint8Array(updateData), "remote");
+    });
+
+    socket.on("awareness-update", (updateData: number[]) => {
+      awarenessProtocol.applyAwarenessUpdate(awareness, new Uint8Array(updateData), "remote");
+    });
+
+    // Listen to local awareness updates and broadcast them
+    awareness.on("update", ({ added, updated, removed }: any, origin: any) => {
+      if (origin !== "remote") {
+        const changedClients = added.concat(updated).concat(removed);
+        const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients);
+        socket.emit("awareness-update", { noteId: note.id, update: Array.from(update) });
+      }
+    });
+
+    // Real-time: receive new comment from another user
+    socket.on("comment-added", (comment: CommentData) => {
+      setComments((prev) => {
+        if (prev.some((c) => c.id === comment.id)) return prev;
+        
+        if (!isCommentsPanelOpenRef.current) {
+          setTimeout(() => setUnreadCommentCount((c) => c + 1), 0);
+        }
+        
+        return [comment, ...prev];
+      });
+    });
+
+    // Real-time: receive resolved comment from another user
+    socket.on("comment-resolved", (commentId: string) => {
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    });
+
+    // Real-time: receive collaborator role updates
+    socket.on("collaborator-role-updated", (data: { clerkId: string; role: "VIEW" | "COMMENT" | "EDIT" }) => {
+      console.log("[socket] collaborator-role-updated received:", data);
+      const activeUser = userRef.current;
+      console.log("[socket] activeUser.id:", activeUser?.id, "data.clerkId:", data.clerkId);
+      if (activeUser && activeUser.id === data.clerkId) {
+        console.log("[socket] Matching user! Updating local role to:", data.role);
+        setRole(data.role);
+        toast(`Your permission was updated to ${data.role} by the owner.`, {
+          icon: '🔒',
+        });
+      }
+    });
+
+    // Real-time: receive collaborator removal
+    socket.on("collaborator-removed", (data: { clerkId: string }) => {
+      console.log("[socket] collaborator-removed received:", data);
+      const activeUser = userRef.current;
+      console.log("[socket] activeUser.id:", activeUser?.id, "data.clerkId:", data.clerkId);
+      if (activeUser && activeUser.id === data.clerkId) {
+        console.log("[socket] Matching user! Evicting to dashboard.");
+        toast.error("Your access to this note has been revoked by the owner.");
+        router.push("/dashboard");
+      }
+    });
+
+    return () => {
+      socket.emit("leave-note", note.id);
+      socket.disconnect();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id]);
+
+  // Listen to awareness state to keep track of active members in real-time
+  useEffect(() => {
+    if (!awareness) return;
+
+    const handleAwarenessUpdate = () => {
+      const states = awareness.getStates();
+      const users: any[] = [];
+      states.forEach((state: any) => {
+        if (state.user) {
+          users.push(state.user);
+        }
+      });
+      
+      // Filter duplicate Clerk IDs (in case user opens multiple tabs)
+      const uniqueUsers = users.reduce((acc: any[], current: any) => {
+        if (!current.id) return acc;
+        const exists = acc.some(item => item.id === current.id);
+        if (!exists) {
+          acc.push(current);
+        }
+        return acc;
+      }, []);
+
+      setActiveUsers(uniqueUsers);
+    };
+
+    awareness.on("change", handleAwarenessUpdate);
+    handleAwarenessUpdate();
+
+    return () => {
+      awareness.off("change", handleAwarenessUpdate);
+    };
+  }, [awareness]);
+
+  // Load collaborators on mount / note change
+  useEffect(() => {
+    if (note.id) {
+      getCollaborators(note.id)
+        .then((collabs) => {
+          setCollaborators(collabs);
+        })
+        .catch((err) => {
+          console.error("Failed to load collaborators:", err);
+        });
+    }
+  }, [note.id]);
+
+
+  const [isAiPanelOpen, setIsAiPanelOpen] = useState(initialRole === "EDIT");
   const [selectionText, setSelectionText] = useState("");
   const [floatingMenuPos, setFloatingMenuPos] = useState<{ top: number; left: number } | null>(null);
 
@@ -59,6 +367,164 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
   const [grammarErrors, setGrammarErrors] = useState<GrammarErrorItem[]>([]);
   const [isCheckingGrammar, setIsCheckingGrammar] = useState(false);
   const [selectedGrammarError, setSelectedGrammarError] = useState<GrammarErrorItem | null>(null);
+
+  const [isLoadingShareData, setIsLoadingShareData] = useState(false);
+
+  const loadShareData = async () => {
+    setIsLoadingShareData(true);
+    setPendingRoles({});
+    try {
+      const [links, collabs] = await Promise.all([
+        getShareLinks(note.id),
+        getCollaborators(note.id),
+      ]);
+      setShareLinks(links);
+      setCollaborators(collabs);
+    } catch (err) {
+      console.error("Failed to load share data:", err);
+    } finally {
+      setIsLoadingShareData(false);
+    }
+  };
+
+  const handleOpenShareModal = () => {
+    setIsShareModalOpen(true);
+    loadShareData();
+  };
+
+  const handleGenerateShareLink = async () => {
+    setIsGeneratingLink(true);
+    try {
+      await createShareLink(
+        note.id,
+        newSharePermission,
+        newShareExpiry || null
+      );
+      toast.success("Share link generated!");
+      // Reload links
+      const links = await getShareLinks(note.id);
+      setShareLinks(links);
+      setNewShareExpiry("");
+    } catch (err) {
+      toast.error("Failed to generate share link");
+    } finally {
+      setIsGeneratingLink(false);
+    }
+  };
+
+  const handleSavePermissions = async () => {
+    setIsSavingPermissions(true);
+    console.log("[save] handleSavePermissions called. pendingRoles:", pendingRoles);
+    try {
+      await Promise.all(
+        Object.entries(pendingRoles).map(async ([collabId, role]) => {
+          await updateCollaboratorRole(note.id, collabId, role);
+          const collabObj = collaborators.find((c) => c.id === collabId);
+          console.log("[save] collabObj found:", collabObj);
+          if (collabObj && collabObj.user && collabObj.user.clerkId) {
+            console.log("[save] Emitting update-collaborator-role:", {
+              noteId: note.id,
+              clerkId: collabObj.user.clerkId,
+              role,
+            });
+            socketRef.current?.emit("update-collaborator-role", {
+              noteId: note.id,
+              clerkId: collabObj.user.clerkId,
+              role,
+            });
+          } else {
+            console.warn("[save] Could not find clerkId for collaborator", collabId);
+          }
+        })
+      );
+      toast.success("Collaborator permissions saved successfully!");
+      setCollaborators((prev) =>
+        prev.map((c) => (pendingRoles[c.id] !== undefined ? { ...c, role: pendingRoles[c.id] } : c))
+      );
+      setPendingRoles({});
+    } catch (err) {
+      toast.error("Failed to save collaborator permissions");
+      console.error(err);
+    } finally {
+      setIsSavingPermissions(false);
+    }
+  };
+
+  const handleRemoveCollaborator = async (collabId: string) => {
+    if (confirm("Are you sure you want to remove this collaborator?")) {
+      try {
+        const collabObj = collaborators.find((c) => c.id === collabId);
+        await removeCollaborator(note.id, collabId);
+        toast.success("Collaborator removed from note");
+        setCollaborators((prev) => prev.filter((c) => c.id !== collabId));
+        
+        if (collabObj && collabObj.user && collabObj.user.clerkId) {
+          socketRef.current?.emit("remove-collaborator", {
+            noteId: note.id,
+            clerkId: collabObj.user.clerkId,
+          });
+        }
+      } catch (err) {
+        toast.error("Failed to remove collaborator");
+        console.error(err);
+      }
+    }
+  };
+
+  const handleDeleteShareLink = async (linkId: string) => {
+    if (confirm("Are you sure you want to deactivate this share link?")) {
+      try {
+        await deleteShareLink(linkId);
+        toast.success("Share link deactivated");
+        const links = await getShareLinks(note.id);
+        setShareLinks(links);
+      } catch (err) {
+        toast.error("Failed to deactivate share link");
+      }
+    }
+  };
+
+  const handleAddComment = async (e?: React.FormEvent | React.KeyboardEvent) => {
+    e?.preventDefault();
+    const txt = newCommentText.trim();
+    if (!txt) return;
+
+    setIsSubmittingComment(true);
+    try {
+      const newComment = await addComment(note.id, txt);
+      const commentData: CommentData = {
+        id: newComment.id,
+        content: newComment.content,
+        resolved: newComment.resolved,
+        createdAt: newComment.createdAt.toISOString(),
+        user: {
+          name: newComment.user.name || "Collaborator",
+          imageUrl: newComment.user.imageUrl || null,
+        },
+      };
+      setComments((prev) => [commentData, ...prev]);
+      setNewCommentText("");
+      // Broadcast to other users in the same note room
+      socketRef.current?.emit("new-comment", { noteId: note.id, comment: commentData });
+      toast.success("Comment added!");
+    } catch (err) {
+      toast.error("Failed to add comment");
+    } finally {
+      setIsSubmittingComment(false);
+    }
+  };
+
+  const handleResolveComment = async (commentId: string) => {
+    try {
+      await resolveComment(commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+      // Broadcast resolution
+      socketRef.current?.emit("resolve-comment", { noteId: note.id, commentId });
+      toast.success("Comment resolved!");
+    } catch (err) {
+      toast.error("Failed to resolve comment");
+    }
+  };
 
 
 
@@ -192,30 +658,35 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const draggedImagePosRef = useRef<number | null>(null);
 
+  const uploadAndInsertImageFile = async (file: File) => {
+    if (!editor) return;
+    const uploadToast = toast.loading("Uploading image to Cloudinary...");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const response = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (data.url) {
+        editor.chain().focus().setImage({ src: data.url }).run();
+        toast.success("Image uploaded and inserted!", { id: uploadToast });
+      } else {
+        toast.error(data.error || "Upload failed", { id: uploadToast });
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error("Upload failed", { id: uploadToast });
+    }
+  };
+
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file && editor) {
-      const uploadToast = toast.loading("Uploading image to Cloudinary...");
-      try {
-        const formData = new FormData();
-        formData.append("file", file);
-
-        const response = await fetch("/api/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        const data = await response.json();
-        if (data.url) {
-          editor.chain().focus().setImage({ src: data.url }).run();
-          toast.success("Image uploaded and inserted!", { id: uploadToast });
-        } else {
-          toast.error(data.error || "Upload failed", { id: uploadToast });
-        }
-      } catch (err) {
-        console.error(err);
-        toast.error("Upload failed", { id: uploadToast });
-      }
+    if (file) {
+      await uploadAndInsertImageFile(file);
     }
     setShowInsertMenu(false);
   };
@@ -425,11 +896,54 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
 
   // Instantiating TipTap Editor
   const editor = useEditor({
-    extensions,
-    content: note.content?.html || "",
+    immediatelyRender: false,
+    extensions: [
+      ...extensions,
+      Collaboration.configure({
+        document: ydoc,
+      }),
+      CustomCollaborationCursor.configure({
+        provider: { awareness: awareness },
+        user: user
+          ? {
+              id: user.id,
+              name: user.firstName || user.fullName || "Collaborator",
+              color: getCursorColor(user.id),
+              imageUrl: user.imageUrl || null,
+            }
+          : {
+              id: "guest",
+              name: "Collaborator",
+              color: "#334537",
+              imageUrl: null,
+            },
+      }),
+    ],
+    editable: role === "EDIT",
     editorProps: {
       attributes: {
         class: "prose max-w-none font-body-lg text-body-lg text-on-surface space-y-md outline-none min-h-[400px] focus:outline-none",
+      },
+      handlePaste: (view, event) => {
+        if (roleRef.current !== "EDIT") {
+          toast.error("This note is read-only. Please request edit access from the author.");
+          return true;
+        }
+        const items = event.clipboardData?.items;
+        if (items) {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (item.type.indexOf("image") === 0) {
+              const file = item.getAsFile();
+              if (file) {
+                event.preventDefault();
+                uploadAndInsertImageFile(file);
+                return true;
+              }
+            }
+          }
+        }
+        return false;
       },
       handleDOMEvents: {
         dragstart: (view, event) => {
@@ -498,6 +1012,13 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
         return false;
       },
       handleKeyDown: (view, event) => {
+        if (roleRef.current !== "EDIT") {
+          const isModifyingKey = event.key.length === 1 || event.key === "Backspace" || event.key === "Delete" || event.key === "Enter";
+          if (isModifyingKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+            toast.error("This note is read-only. Please request edit access from the author.");
+            return true;
+          }
+        }
         // Intercept Undo / Redo shortcuts (Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z)
         const isMac = typeof navigator !== "undefined" && /Mac/.test(navigator.platform);
         const isUndo = (isMac ? event.metaKey : event.ctrlKey) && event.key.toLowerCase() === "z" && !event.shiftKey;
@@ -658,7 +1179,9 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
       setCharCount(text.length);
       setWordCount(text.trim().split(/\s+/).filter(Boolean).length);
       
-      triggerAutoSave(headingTitleRef.current, html);
+      if (editor.isFocused) {
+        triggerAutoSave(headingTitleRef.current, html);
+      }
       checkSlashCommand(editor);
       checkTableActive(editor);
     },
@@ -698,7 +1221,61 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
   useEffect(() => {
     editorRef.current = editor;
     executeCommandRef.current = executeSlashCommand;
-  }, [editor]);
+    if (editor) {
+      console.log("[editable effect] Setting editor.setEditable to:", role === "EDIT", "current role is:", role);
+      editor.setEditable(role === "EDIT");
+      setTimeout(() => {
+        const el = document.querySelector(".ProseMirror") as HTMLElement;
+        if (el) {
+          el.contentEditable = role === "EDIT" ? "true" : "false";
+        }
+      }, 0);
+      if (needsInitRef.current) {
+        needsInitRef.current = false;
+        editor.commands.setContent(initialContentRef.current, { emitUpdate: false });
+        const update = Y.encodeStateAsUpdate(ydoc);
+        socketRef.current?.emit("ydoc-update", { noteId: note.id, update: Array.from(update) });
+      }
+    }
+  }, [editor, role]);
+
+  // Update local awareness state when user changes
+  useEffect(() => {
+    if (user && editor) {
+      editor.commands.updateUser({
+        id: user.id,
+        name: user.firstName || user.fullName || "Collaborator",
+        color: getCursorColor(user.id),
+        imageUrl: user.imageUrl || null,
+      });
+    }
+  }, [user, editor]);
+
+  // Idle detection to hide cursor and name
+  useEffect(() => {
+    if (!editor || !awareness) return;
+
+    let idleTimeout: NodeJS.Timeout;
+
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimeout);
+      idleTimeout = setTimeout(() => {
+        // Clear local cursor state when idle
+        awareness.setLocalStateField("cursor", null);
+      }, 15000); // 15 seconds of inactivity
+    };
+
+    // Listen to editor transaction updates (keystrokes, selection changes, etc.)
+    editor.on("transaction", resetIdleTimer);
+
+    // Initial start
+    resetIdleTimer();
+
+    return () => {
+      clearTimeout(idleTimeout);
+      editor.off("transaction", resetIdleTimer);
+    };
+  }, [editor, awareness]);
 
   useEffect(() => {
     if (!editor) return;
@@ -715,14 +1292,9 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
     return () => observer.disconnect();
   }, [editor]);
 
-  // Sync content when note ID changes
+  // Sync metadata and stats when note ID changes
   useEffect(() => {
     if (editor && note) {
-      const savedHTML = note.content?.html || "";
-      const currentHTML = editor.getHTML();
-      if (savedHTML !== currentHTML) {
-        editor.commands.setContent(savedHTML, { emitUpdate: false });
-      }
       setNoteTitle(note.title);
       setHeadingTitle(note.content?.heading || note.title || "Untitled document");
       
@@ -752,6 +1324,7 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
 
   // Debounced auto-save triggers database actions
   const triggerAutoSave = (currentHeading: string, currentHtml: string) => {
+    if (roleRef.current !== "EDIT") return;
     setSaveStatus("Saving...");
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -833,6 +1406,7 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
 
   // Save when file title is renamed (via double click)
   const saveFileTitle = async (newTitle: string) => {
+    if (roleRef.current !== "EDIT") return;
     const trimmed = newTitle.trim();
     if (!trimmed) {
       toast.error("Title cannot be empty");
@@ -966,6 +1540,7 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
   const handleAiOnSelection = async () => {
     if (!selectionText) return;
     setIsAiPanelOpen(true);
+    setIsCommentsPanelOpen(false);
     setIsTyping(true);
     setFloatingMenuPos(null);
 
@@ -1322,74 +1897,180 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
   })();
 
   return (
-    <div className="bg-background text-on-background font-body-md h-screen flex overflow-hidden antialiased relative">
+    <div className="bg-background text-on-background font-body-md fixed inset-0 flex overflow-hidden antialiased">
       {/* Unified SideNavBar */}
       <Sidebar
-        activeRoute={`/note/${note.id}`}
-        activeSubject={{ id: note.subjectId, title: note.subjectTitle }}
-        activeChapterTitle={note.chapterTitle}
+        activeRoute={isShared ? `/share` : `/note/${note.id}`}
+        activeSubject={isShared ? undefined : { id: note.subjectId, title: note.subjectTitle }}
+        activeChapterTitle={isShared ? undefined : note.chapterTitle}
+        isShared={isShared}
+        sharedNoteTitle={note.title}
       />
 
       {/* Main Workspace Area */}
       <div
-        className="flex-1 flex flex-col md:pl-[280px] h-screen transition-all duration-300 relative"
+        className="flex-1 flex flex-col min-h-0 w-full transition-all duration-300 relative md:pl-[280px]"
       >
         {/* TopAppBar with Menu Bar */}
         <header className="flex flex-col border-b border-outline-variant bg-surface-container-lowest shrink-0 z-30 px-lg py-xs">
           {/* Row 1 */}
           <div className="flex items-center justify-between h-10">
             <div className="flex items-center gap-sm text-secondary font-body-md text-body-md">
-              <span className="material-symbols-outlined text-[18px]">folder</span>
-              <Link href="/dashboard" className="hover:text-primary cursor-pointer transition-colors">
-                Subjects
-              </Link>
-              <span className="material-symbols-outlined text-[16px]">chevron_right</span>
-              <Link href={`/subject/${note.subjectId}`} className="hover:text-primary cursor-pointer transition-colors">
-                {note.subjectTitle}
-              </Link>
+              <span className="material-symbols-outlined text-[18px]">{isOwner ? "folder" : ""}</span>
+              {isOwner ? (
+                <>
+                  <Link href="/dashboard" className="hover:text-primary cursor-pointer transition-colors">
+                    Subjects
+                  </Link>
+                  <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                  <Link href={`/subject/${note.subjectId}`} className="hover:text-primary cursor-pointer transition-colors">
+                    {note.subjectTitle}
+                  </Link>
+                </>
+              ) : (
+                <>
+                  <span className="font-semibold text-primary">Shared Note</span>
+                  <span className="material-symbols-outlined text-[16px]">chevron_right</span>
+                  <span className="text-secondary">{note.title}</span>
+                </>
+              )}
               
-              <span className="ml-lg text-outline font-label-sm text-label-sm flex items-center gap-xs hidden sm:flex">
-                <span className="material-symbols-outlined text-[14px]">
-                  {saveStatus === "Saving..." ? "sync" : saveStatus === "Failed to save changes" ? "error" : "cloud_done"}
+              {role === "EDIT" && (
+                <span className="ml-lg text-outline font-label-sm text-label-sm flex items-center gap-xs hidden sm:flex">
+                  <span className="material-symbols-outlined text-[14px]">
+                    {saveStatus === "Saving..." ? "sync" : saveStatus === "Failed to save changes" ? "error" : "cloud_done"}
+                  </span>
+                  {saveStatus}
                 </span>
-                {saveStatus}
-              </span>
+              )}
             </div>
             
             <div className="flex items-center gap-md">
-              <div className="flex -space-x-2 mr-sm">
-                <img
-                  alt="Collaborator"
-                  className="w-8 h-8 rounded-full border-2 border-surface-container-lowest"
-                  src="https://lh3.googleusercontent.com/aida-public/AB6AXuAsr9_LNANJnd4-VqiTRg2huRArlTruk-9K1icj43aPRhDMvz3533Um7gY_itVf6pIJ-vQKxR9JZn6oC2vqrpYK9W57W11vniQyHx8Sq01oIKiA4U2BMo0p1YT7-kLbt1QD0DMdVJlziUXBlcuuTHJQXZZPlJt62Raud3lv_-nUjy5t_AxPP5-0MjBACiKlwMKvLTDwg06plrsSj2ECYL57tod81ZJF3zJF88ORX2W5YVuWzj6Gaa_G4k4Uyv1MhP7hihQDh4W8M2G8"
-                />
-                <div className="w-8 h-8 rounded-full border-2 border-surface-container-lowest bg-primary-container flex items-center justify-center text-on-primary-container font-label-sm text-label-sm">
-                  +2
+              {/* Dynamic Collaborators Avatar Pile */}
+              <div className="flex items-center gap-xs mr-sm">
+                <div className="relative flex items-center h-8 w-16 select-none">
+                  {/* Owner Profile (at the back) */}
+                  <div
+                    className="absolute left-0 w-8 h-8 rounded-full border-2 border-surface-container-lowest bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-sm z-10"
+                    title={`${ownerName} (Owner)`}
+                  >
+                    {ownerImageUrl ? (
+                      <img src={ownerImageUrl} alt={ownerName} className="w-full h-full object-cover" />
+                    ) : (
+                      <span>{ownerName.charAt(0).toUpperCase()}</span>
+                    )}
+                  </div>
+
+                  {/* Tilted Collaborator Profile (in front) */}
+                  {liveCollaborators.length > 0 && (
+                    <div
+                      className="absolute left-5 w-8 h-8 rounded-full border-2 border-surface-container-lowest bg-secondary-container text-on-secondary-container flex items-center justify-center font-bold text-xs shrink-0 overflow-hidden shadow-sm z-20"
+                      title={
+                        liveCollaborators.length > 1
+                          ? `${liveCollaborators.map(u => u.name).join(", ")}`
+                          : `${liveCollaborators[0].name || "Collaborator"}`
+                      }
+                    >
+                      {liveCollaborators[0].imageUrl ? (
+                        <img src={liveCollaborators[0].imageUrl} alt={liveCollaborators[0].name} className="w-full h-full object-cover" />
+                      ) : (
+                        <span>{(liveCollaborators[0].name || "Collaborator").charAt(0).toUpperCase()}</span>
+                      )}
+
+                      {liveCollaborators.length > 1 && (
+                        <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-white text-[9px] font-extrabold select-none">
+                          +{liveCollaborators.length - 1}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               
-              <button className="flex items-center gap-xs px-sm py-xs border border-outline-variant rounded-xl hover:bg-surface-container-high transition-colors text-secondary">
-                <span className="material-symbols-outlined text-[18px]">share</span>
-                <span className="font-label-md text-label-md">Share</span>
-              </button>
+              {isOwner && (
+                <button
+                  onClick={handleOpenShareModal}
+                  className="flex items-center gap-xs px-sm py-xs border border-outline-variant rounded-xl hover:bg-surface-container-high transition-colors text-secondary cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[18px]">share</span>
+                  <span className="font-label-md text-label-md">Share</span>
+                </button>
+              )}
+
+              {(role === "COMMENT" || role === "EDIT" || isOwner) && (
+                <button
+                  onClick={() => {
+                    setIsCommentsPanelOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setIsAiPanelOpen(false);
+                        setUnreadCommentCount(0); // clear unread when opening
+                      }
+                      return next;
+                    });
+                  }}
+                  className={`w-8 h-8 flex items-center justify-center rounded-full transition-colors relative hover:bg-surface-container-high cursor-pointer ${
+                    isCommentsPanelOpen ? "text-primary font-bold" : "text-secondary hover:text-on-surface"
+                  }`}
+                  title="Toggle Comments"
+                >
+                  <span className="material-symbols-outlined text-[20px]">forum</span>
+                  {unreadCommentCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 bg-error text-white text-[9px] w-4 h-4 rounded-full flex items-center justify-center font-bold">
+                      {unreadCommentCount > 9 ? "9+" : unreadCommentCount}
+                    </span>
+                  )}
+                </button>
+              )}
+
+              {/* Request Access button — shown for VIEW/COMMENT shared users only */}
+              {isShared && (role === "VIEW" || role === "COMMENT") && (
+                <button
+                  onClick={() => {
+                    socketRef.current?.emit("request-access", {
+                      noteId: note.id,
+                      requesterName: "Collaborator",
+                      requesterId: "",
+                    });
+                  }}
+                  className="flex items-center gap-xs px-sm py-xs border border-primary/40 text-primary rounded-xl hover:bg-primary/10 transition-colors font-label-md text-label-md cursor-pointer text-[12px]"
+                  title="Request edit access from the author"
+                >
+                  <span className="material-symbols-outlined text-[16px]">edit_note</span>
+                  <span className="hidden sm:inline">Request Access</span>
+                </button>
+              )}
               
-              <button
-                onClick={() => setIsAiPanelOpen((prev) => !prev)}
-                className={`w-8 h-8 flex items-center justify-center transition-colors ${
-                  isAiPanelOpen ? "text-primary font-bold" : "text-secondary hover:text-on-surface"
-                }`}
-                id="toggleAiPanel"
-                title="Toggle AI Sidebar"
-              >
-                <span className="material-symbols-outlined">smart_toy</span>
-              </button>
-              <button
-                onClick={handleDeleteNote}
-                className="w-8 h-8 flex items-center justify-center text-secondary hover:text-error hover:bg-error/10 transition-colors rounded-full"
-                title="Delete Note"
-              >
-                <span className="material-symbols-outlined">delete</span>
-              </button>
+              {role === "EDIT" && (
+                <button
+                  onClick={() => {
+                    setIsAiPanelOpen((prev) => {
+                      const next = !prev;
+                      if (next) {
+                        setIsCommentsPanelOpen(false);
+                      }
+                      return next;
+                    });
+                  }}
+                  className={`w-8 h-8 flex items-center justify-center transition-colors hover:bg-surface-container-high rounded-full cursor-pointer ${
+                    isAiPanelOpen ? "text-primary font-bold" : "text-secondary hover:text-on-surface"
+                  }`}
+                  id="toggleAiPanel"
+                  title="Toggle AI Sidebar"
+                >
+                  <span className="material-symbols-outlined">smart_toy</span>
+                </button>
+              )}
+
+              {isOwner && (
+                <button
+                  onClick={handleDeleteNote}
+                  className="w-8 h-8 flex items-center justify-center text-secondary hover:text-error hover:bg-error/10 transition-colors rounded-full cursor-pointer"
+                  title="Delete Note"
+                >
+                  <span className="material-symbols-outlined">delete</span>
+                </button>
+              )}
               <div className="w-8 h-8 flex items-center justify-center">
                 <UserButton />
               </div>
@@ -1397,7 +2078,8 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
           </div>
 
           {/* Row 2: Menu Bar */}
-          <div className="flex items-center gap-md h-7 mt-1 select-none text-sm text-secondary font-medium">
+          {role === "EDIT" ? (
+            <div className="flex items-center gap-md h-7 mt-1 select-none text-sm text-secondary font-medium">
             {/* File Menu Dropdown Trigger */}
             <div className="relative">
               <button
@@ -1471,6 +2153,25 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
                     <span className="material-symbols-outlined text-[16px] text-secondary">file_copy</span>
                     <span>Save as</span>
                   </button>
+                  {isShared && (
+                    <button
+                      onClick={async () => {
+                        setShowFileMenu(false);
+                        const loadingToast = toast.loading("Making a copy of this note...");
+                        try {
+                          const copiedNote = await copySharedNote(note.id, authorName);
+                          toast.success("Note copied successfully!", { id: loadingToast });
+                          router.push(`/note/${copiedNote.id}`);
+                        } catch (err) {
+                          toast.error("Failed to copy note", { id: loadingToast });
+                        }
+                      }}
+                      className="w-full text-left px-md py-1.5 hover:bg-surface-container-high flex items-center gap-sm"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-secondary">content_copy</span>
+                      <span>Make a copy</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       const inputEl = document.querySelector('input[placeholder="Note Title"]') as HTMLInputElement;
@@ -1482,16 +2183,18 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
                     <span className="material-symbols-outlined text-[16px] text-secondary">drive_file_rename_outline</span>
                     <span>Rename</span>
                   </button>
-                  <button
-                    onClick={() => {
-                      handleDeleteNote();
-                      setShowFileMenu(false);
-                    }}
-                    className="w-full text-left px-md py-1.5 hover:bg-surface-container-high text-error hover:bg-error/5 flex items-center gap-sm"
-                  >
-                    <span className="material-symbols-outlined text-[16px] text-error">delete</span>
-                    <span>Delete</span>
-                  </button>
+                  {isOwner && (
+                    <button
+                      onClick={() => {
+                        handleDeleteNote();
+                        setShowFileMenu(false);
+                      }}
+                      className="w-full text-left px-md py-1.5 hover:bg-surface-container-high text-error hover:bg-error/5 flex items-center gap-sm"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-error">delete</span>
+                      <span>Delete</span>
+                    </button>
+                  )}
                   <div className="border-t border-outline-variant/30 my-[4px]" />
                   <button
                     onClick={() => {
@@ -2210,16 +2913,83 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
             <button className="hover:bg-surface-container-high px-2 py-0.5 rounded cursor-pointer transition-colors">Tools</button>
             <button className="hover:bg-surface-container-high px-2 py-0.5 rounded cursor-pointer transition-colors">Help</button>
           </div>
+          ) : isShared ? (
+            <div className="flex items-center gap-md h-7 mt-1 select-none text-sm text-secondary font-medium">
+              {/* File Menu Dropdown Trigger for Read-Only Shared Users */}
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowFileMenu(!showFileMenu);
+                  }}
+                  className={`hover:bg-surface-container-high px-2 py-0.5 rounded cursor-pointer transition-colors flex items-center ${
+                    showFileMenu ? "bg-surface-container-high text-primary font-semibold" : ""
+                  }`}
+                >
+                  File
+                </button>
+
+                {showFileMenu && (
+                  <div 
+                    onClick={(e) => e.stopPropagation()}
+                    className="absolute top-8 left-0 bg-surface border border-outline-variant shadow-ambient-overlay rounded-lg py-1 flex flex-col z-50 w-48 text-on-surface font-label-md text-[13px]"
+                  >
+                    <Link
+                      href="/dashboard"
+                      onClick={() => setShowFileMenu(false)}
+                      className="w-full text-left px-md py-1.5 hover:bg-surface-container-high flex items-center gap-sm"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-secondary">folder_open</span>
+                      <span>Open</span>
+                    </Link>
+
+                    <button
+                      onClick={async () => {
+                        setShowFileMenu(false);
+                        const loadingToast = toast.loading("Making a copy of this note...");
+                        try {
+                          const copiedNote = await copySharedNote(note.id, authorName);
+                          toast.success("Note copied successfully!", { id: loadingToast });
+                          router.push(`/note/${copiedNote.id}`);
+                        } catch (err) {
+                          toast.error("Failed to copy note", { id: loadingToast });
+                        }
+                      }}
+                      className="w-full text-left px-md py-1.5 hover:bg-surface-container-high flex items-center gap-sm"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-secondary">content_copy</span>
+                      <span>Make a copy</span>
+                    </button>
+
+                    <div className="border-t border-outline-variant/30 my-[4px]" />
+                    
+                    <button
+                      onClick={() => {
+                        window.print();
+                        setShowFileMenu(false);
+                      }}
+                      className="w-full text-left px-md py-1.5 hover:bg-surface-container-high flex items-center gap-sm"
+                    >
+                      <span className="material-symbols-outlined text-[16px] text-secondary">print</span>
+                      <span>Print</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
         </header>
 
         {/* Editor Toolbar */}
-        <Toolbar
-          editor={editor}
-          pageSize={pageSize}
-          setPageSize={setPageSize}
-          pageColor={pageColor}
-          setPageColor={setPageColor}
-        />
+        <div className={role !== "EDIT" ? "pointer-events-none opacity-50 transition-opacity" : "transition-opacity"}>
+          <Toolbar
+            editor={editor}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            pageColor={pageColor}
+            setPageColor={setPageColor}
+          />
+        </div>
 
         {/* Editor Canvas Area — main stays full width, page-sheet moves via margin */}
         <div className="flex-1 flex overflow-hidden relative">
@@ -2227,7 +2997,15 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
             className="flex-1 overflow-y-auto bg-surface-container-high relative p-md"
             id="editorCanvas"
             ref={editorCanvasRef}
-            onContextMenu={handleContextMenu}
+            onContextMenu={role === "EDIT" ? handleContextMenu : undefined}
+            onClick={(e) => {
+              if (role !== "EDIT") {
+                const target = e.target as HTMLElement;
+                if (target.closest(".page-sheet") && !target.closest("input")) {
+                  toast.error("This note is read-only. Please request edit access from the author.");
+                }
+              }
+            }}
           >
             <div
               className={`page-sheet page-${pageSize} max-w-full relative`}
@@ -2242,7 +3020,18 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
                   placeholder="Untitled document"
                   type="text"
                   value={headingTitle}
-                  onChange={(e) => handleHeadingChange(e.target.value)}
+                  onChange={(e) => {
+                    if (role === "EDIT") {
+                      handleHeadingChange(e.target.value);
+                    }
+                  }}
+                  readOnly={role !== "EDIT"}
+                  onClick={(e) => {
+                    if (role !== "EDIT") {
+                      e.stopPropagation();
+                      toast.error("This note is read-only. Please request edit access from the author.");
+                    }
+                  }}
                 />
               </div>
               
@@ -2308,24 +3097,28 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
                 }}
                 onMouseDown={(e) => e.preventDefault()}
               >
-                <button
-                  onClick={() => editor?.chain().focus().toggleBold().run()}
-                  className={`p-xs rounded-lg ${
-                    editor?.isActive("bold") ? "bg-primary-container text-on-primary-container" : "text-on-surface hover:bg-surface-container-high"
-                  }`}
-                  title="Bold"
-                >
-                  <span className="material-symbols-outlined text-[16px]">format_bold</span>
-                </button>
-                <button
-                  onClick={() => editor?.chain().focus().toggleItalic().run()}
-                  className={`p-xs rounded-lg ${
-                    editor?.isActive("italic") ? "bg-primary-container text-on-primary-container" : "text-on-surface hover:bg-surface-container-high"
-                  }`}
-                  title="Italic"
-                >
-                  <span className="material-symbols-outlined text-[16px]">format_italic</span>
-                </button>
+                {role === "EDIT" && (
+                  <>
+                    <button
+                      onClick={() => editor?.chain().focus().toggleBold().run()}
+                      className={`p-xs rounded-lg ${
+                        editor?.isActive("bold") ? "bg-primary-container text-on-primary-container" : "text-on-surface hover:bg-surface-container-high"
+                      }`}
+                      title="Bold"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">format_bold</span>
+                    </button>
+                    <button
+                      onClick={() => editor?.chain().focus().toggleItalic().run()}
+                      className={`p-xs rounded-lg ${
+                        editor?.isActive("italic") ? "bg-primary-container text-on-primary-container" : "text-on-surface hover:bg-surface-container-high"
+                      }`}
+                      title="Italic"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">format_italic</span>
+                    </button>
+                  </>
+                )}
                 <button
                   onClick={handleAiOnSelection}
                   className="p-xs text-primary hover:bg-primary-container hover:text-on-primary-container rounded-lg flex items-center gap-xs px-2"
@@ -2559,8 +3352,10 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
                           onClick={() => {
                             const updated = grammarErrors.filter(err => err.id !== selectedGrammarError.id);
                             setGrammarErrors(updated);
-                            const tr = editor.state.tr.setMeta("setGrammarErrors", updated.map(err => ({ id: err.id, from: err.from, to: err.to })));
-                            editor.view.dispatch(tr);
+                            if (editor) {
+                              const tr = editor.state.tr.setMeta("setGrammarErrors", updated.map(err => ({ id: err.id, from: err.from, to: err.to })));
+                              editor.view.dispatch(tr);
+                            }
                             setSelectedGrammarError(null);
                             setContextMenuPos(null);
                           }}
@@ -2634,7 +3429,8 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
           </main>
 
           {/* AI Assistant Sidebar Panel */}
-          <aside
+          {role === "EDIT" && (
+            <aside
             className={`w-[400px] bg-surface border-l border-outline-variant flex flex-col transition-all duration-300 absolute lg:relative right-0 top-0 bottom-0 z-30 h-full ${
               isAiPanelOpen
                 ? "translate-x-0 opacity-100 pointer-events-auto"
@@ -2752,6 +3548,123 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
                 </button>
               </form>
             </div>
+          </aside>
+          )}
+
+          {/* Comments Sidebar Panel */}
+          <aside
+            className={`w-[400px] bg-surface border-l border-outline-variant flex flex-col transition-all duration-300 absolute lg:relative right-0 top-0 bottom-0 z-30 h-full ${
+              isCommentsPanelOpen
+                ? "translate-x-0 opacity-100 pointer-events-auto"
+                : "translate-x-full lg:w-0 lg:border-l-0 lg:opacity-0 lg:overflow-hidden pointer-events-none"
+            }`}
+            id="commentsPanel"
+          >
+            {/* Header */}
+            <div className="h-12 flex items-center justify-between px-md shrink-0 border-b border-outline-variant">
+              <div className="flex items-center gap-xs text-primary">
+                <span className="material-symbols-outlined text-[20px]">forum</span>
+                <span className="font-label-md text-label-md">Comments</span>
+              </div>
+              <button
+                onClick={() => setIsCommentsPanelOpen(false)}
+                className="text-secondary hover:text-on-surface transition-colors cursor-pointer border-none bg-transparent"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            {/* Comments Stream */}
+            <div className="flex-1 overflow-y-auto p-md space-y-md">
+              {comments.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-center text-outline p-lg">
+                  <span className="material-symbols-outlined text-[36px] mb-xs">chat_bubble_outline</span>
+                  <p className="text-sm">No comments yet.</p>
+                  <p className="text-[11px] mt-xs">Start the conversation by adding a comment below.</p>
+                </div>
+              ) : (
+                comments.map((comment) => (
+                  <div key={comment.id} className="bg-surface-container-low border border-outline-variant/50 p-sm rounded-xl flex flex-col gap-sm shadow-xs animate-fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-xs">
+                        {comment.user.imageUrl ? (
+                          <img
+                            src={comment.user.imageUrl}
+                            alt={comment.user.name}
+                            className="w-6 h-6 rounded-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-6 h-6 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px]">
+                            {comment.user.name.charAt(0).toUpperCase()}
+                          </div>
+                        )}
+                        <span className="font-label-md text-label-md text-on-surface font-semibold truncate max-w-[150px]">
+                          {comment.user.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-xs">
+                        <span className="text-[10px] text-outline">
+                          {(() => {
+                            const diffMs = Date.now() - new Date(comment.createdAt).getTime();
+                            const diffMins = Math.floor(diffMs / 60000);
+                            const diffHrs = Math.floor(diffMins / 60);
+                            if (diffMins < 1) return "just now";
+                            if (diffMins < 60) return `${diffMins}m ago`;
+                            if (diffHrs < 24) return `${diffHrs}h ago`;
+                            return new Date(comment.createdAt).toLocaleDateString();
+                          })()}
+                        </span>
+                        {isOwner && (
+                          <button
+                            onClick={() => handleResolveComment(comment.id)}
+                            className="w-5 h-5 flex items-center justify-center text-outline hover:text-success hover:bg-success/10 rounded-full transition-colors cursor-pointer border-none bg-transparent"
+                            title="Resolve comment"
+                          >
+                            <span className="material-symbols-outlined text-[14px]">check</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="text-body-md text-secondary text-sm whitespace-pre-wrap select-text leading-relaxed pl-1">
+                      {comment.content}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Comment Form */}
+            {(role === "COMMENT" || role === "EDIT" || isOwner) && (
+              <div className="p-sm bg-surface shrink-0 border-t border-outline-variant">
+                <form onSubmit={handleAddComment} className="flex flex-col gap-xs">
+                  <textarea
+                    rows={2}
+                    className="w-full bg-surface-container-lowest border border-outline-variant rounded-xl p-sm text-sm focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none placeholder-outline resize-none text-on-surface"
+                    placeholder="Write a comment... (Enter to send)"
+                    value={newCommentText}
+                    onChange={(e) => setNewCommentText(e.target.value)}
+                    disabled={isSubmittingComment}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (newCommentText.trim() && !isSubmittingComment) {
+                          handleAddComment(e);
+                        }
+                      }
+                    }}
+                  />
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={isSubmittingComment || !newCommentText.trim()}
+                      className="bg-primary text-on-primary rounded-full px-md py-xs font-label-md text-xs hover:bg-surface-tint transition-all disabled:opacity-50 cursor-pointer"
+                    >
+                      {isSubmittingComment ? "Posting..." : "Comment"}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
           </aside>
         </div>
 
@@ -2878,7 +3791,15 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
           <span>Home</span>
         </Link>
         <button
-          onClick={() => setIsAiPanelOpen((prev) => !prev)}
+          onClick={() => {
+            setIsAiPanelOpen((prev) => {
+              const next = !prev;
+              if (next) {
+                setIsCommentsPanelOpen(false);
+              }
+              return next;
+            });
+          }}
           className="flex flex-col items-center justify-center text-primary font-bold font-label-sm text-label-sm py-xs px-md rounded-xl scale-95 transition-all"
         >
           <span className="material-symbols-outlined text-[24px] fill">smart_toy</span>
@@ -3015,6 +3936,258 @@ export default function NoteEditorClient({ note }: { note: NoteData }) {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Share Modal Dialog */}
+      {isShareModalOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-xs flex items-center justify-center z-[99] p-md select-none">
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            className="bg-surface border border-outline-variant rounded-2xl w-full max-w-2xl shadow-ambient-raised flex flex-col max-h-[85vh] overflow-hidden select-text"
+          >
+            {/* Header */}
+            <div className="p-md border-b border-outline-variant flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-sm text-primary">
+                <span className="material-symbols-outlined">share</span>
+                <h2 className="font-headline-sm text-headline-sm font-bold">Share Note</h2>
+              </div>
+              <button 
+                onClick={() => setIsShareModalOpen(false)}
+                className="text-secondary hover:text-on-surface transition-colors w-8 h-8 flex items-center justify-center rounded-full hover:bg-surface-container-high cursor-pointer border-none bg-transparent"
+              >
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="p-md overflow-y-auto flex-grow space-y-lg">
+              {/* Generate New Link Form */}
+              <div className="bg-surface-container-low border border-outline-variant/60 rounded-xl p-sm flex flex-col gap-sm">
+                <h3 className="font-label-lg text-label-lg text-center font-bold text-on-surface">Generate Share Link</h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-sm">
+                  {/* Permission selector */}
+                  <div className="flex flex-col gap-xs">
+                    <label className="text-[11px] font-bold text-outline uppercase">Permission</label>
+                    <select
+                      className="bg-surface border border-outline-variant rounded-xl p-2 text-sm focus:border-primary focus:outline-none text-on-surface cursor-pointer"
+                      value={newSharePermission}
+                      onChange={(e) => setNewSharePermission(e.target.value as any)}
+                    >
+                      <option value="VIEW">VIEW (Read-only)</option>
+                      <option value="COMMENT">COMMENT (Read & Comment)</option>
+                      <option value="EDIT">EDIT (Full Edit Access)</option>
+                    </select>
+                  </div>
+
+                  {/* Expiration selector */}
+                  <div className="flex flex-col gap-xs">
+                    <label className="text-[11px] font-bold text-outline uppercase">Expires At (Optional)</label>
+                    <input
+                      type="datetime-local"
+                      className="bg-surface border border-outline-variant rounded-xl p-2 text-sm focus:border-primary focus:outline-none text-on-surface cursor-pointer"
+                      value={newShareExpiry}
+                      onChange={(e) => setNewShareExpiry(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-center mt-xs">
+                  <button
+                    onClick={handleGenerateShareLink}
+                    disabled={isGeneratingLink}
+                    className="bg-primary text-on-primary rounded-full px-md py-sm font-label-md text-sm hover:bg-surface-tint transition-all disabled:opacity-50 cursor-pointer border-none"
+                  >
+                    {isGeneratingLink ? "Generating..." : "Generate Link"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Links list */}
+              <div className="space-y-sm">
+                <h3 className="font-label-lg text-label-lg font-bold text-on-surface flex items-center gap-xs">
+                  <span className="material-symbols-outlined text-[16px] text-secondary">link</span>
+                  Active Share Links
+                </h3>
+                
+                {isLoadingShareData ? (
+                  <div className="space-y-xs animate-pulse">
+                    {[1, 2].map((i) => (
+                      <div key={i} className="border border-outline-variant/60 rounded-xl p-sm flex flex-col gap-xs bg-surface-container-lowest">
+                        <div className="flex items-center justify-between">
+                          <div className="h-4 w-12 bg-outline-variant/40 rounded-full" />
+                          <div className="h-3.5 w-24 bg-outline-variant/30 rounded" />
+                        </div>
+                        <div className="flex items-center gap-xs mt-1">
+                          <div className="flex-1 h-8 bg-outline-variant/20 rounded-lg" />
+                          <div className="w-8 h-8 bg-outline-variant/20 rounded-full" />
+                          <div className="w-8 h-8 bg-outline-variant/20 rounded-full" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : shareLinks.length === 0 ? (
+                  <p className="text-xs text-outline italic">No active share links. Generate one above to share.</p>
+                ) : (
+                  <div className="space-y-xs">
+                    {shareLinks.map((link) => {
+                      const shareUrl = `${window.location.origin}/share/${link.token}`;
+                      return (
+                        <div key={link.id} className="border border-outline-variant rounded-xl p-sm flex flex-col gap-xs bg-surface-container-lowest">
+                          <div className="flex items-center justify-between text-xs">
+                            <span className={`px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[9px] ${
+                              link.permission === "EDIT" 
+                                ? "bg-primary/15 text-primary" 
+                                : link.permission === "COMMENT"
+                                ? "bg-secondary/15 text-secondary"
+                                : "bg-outline/15 text-outline"
+                            }`}>
+                              {link.permission}
+                            </span>
+                            <span className="text-outline text-[10px]">
+                              {link.expiresAt 
+                                ? `Expires: ${new Date(link.expiresAt).toLocaleString()}` 
+                                : "Never expires"
+                              }
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-xs mt-1">
+                            <input
+                              type="text"
+                              readOnly
+                              value={shareUrl}
+                              className="bg-surface-container border border-outline-variant/60 rounded-lg p-2 text-xs font-mono flex-1 text-on-surface select-all"
+                            />
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(shareUrl);
+                                toast.success("Copied to clipboard!");
+                              }}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container text-secondary hover:text-primary transition-all cursor-pointer border-none bg-transparent"
+                              title="Copy link"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">content_copy</span>
+                            </button>
+                            <button
+                              onClick={() => handleDeleteShareLink(link.id)}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-error/10 text-secondary hover:text-error transition-all cursor-pointer border-none bg-transparent"
+                              title="Deactivate link"
+                            >
+                              <span className="material-symbols-outlined text-[18px]">link_off</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Collaborators list */}
+              <div className="space-y-sm pt-2">
+                <h3 className="font-label-lg text-label-lg font-bold text-on-surface flex items-center gap-xs">
+                  <span className="material-symbols-outlined text-[16px] text-secondary">group</span>
+                  Current Collaborators
+                </h3>
+                
+                {collaborators.length === 0 ? (
+                  <p className="text-xs text-outline italic">No collaborators have accessed this note yet.</p>
+                ) : (
+                  <div className="border border-outline-variant rounded-xl divide-y divide-outline-variant/50 bg-surface-container-lowest overflow-hidden">
+                    {sortedCollaborators.map((collab) => (
+                      <div key={collab.id} className="p-sm flex items-center justify-between text-sm hover:bg-surface-container-lowest transition-colors">
+                        <div className="flex items-center gap-sm">
+                          {collab.user.imageUrl ? (
+                            <img
+                              src={collab.user.imageUrl}
+                              alt={collab.user.name}
+                              className="w-7 h-7 rounded-full object-cover border border-outline-variant"
+                            />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
+                              {collab.user.name ? collab.user.name.charAt(0).toUpperCase() : "C"}
+                            </div>
+                          )}
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-xs">
+                              <span className="font-semibold text-on-surface">{collab.user.name || "Collaborator"}</span>
+                              {activeUsers.some((u) => u.id === collab.user.clerkId) && (
+                                <span className="flex items-center gap-1 bg-success/15 text-success text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-wider scale-90 origin-left">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-success animate-pulse" />
+                                  Live
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[10px] text-outline">Joined {new Date(collab.createdAt).toLocaleDateString()}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-xs">
+                          {/* Access select dropdown */}
+                          <select
+                            value={pendingRoles[collab.id] !== undefined ? pendingRoles[collab.id] : collab.role}
+                            onChange={(e) => {
+                              const newRole = e.target.value as "VIEW" | "COMMENT" | "EDIT";
+                              setPendingRoles((prev) => ({
+                                ...prev,
+                                [collab.id]: newRole,
+                              }));
+                            }}
+                            className="bg-surface-container border border-outline-variant/60 rounded-lg px-2 py-1 text-xs text-secondary hover:text-primary outline-none focus:ring-1 focus:ring-primary/40 cursor-pointer"
+                          >
+                            <option value="VIEW">VIEW</option>
+                            <option value="COMMENT">COMMENT</option>
+                            <option value="EDIT">EDIT</option>
+                          </select>
+
+                          {/* Remove collaborator button */}
+                          <button
+                            onClick={() => handleRemoveCollaborator(collab.id)}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-error/10 text-secondary hover:text-error transition-all cursor-pointer border-none bg-transparent"
+                            title="Remove Collaborator"
+                          >
+                            <span className="material-symbols-outlined text-[18px]">delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {Object.keys(pendingRoles).length > 0 && (
+                  <div className="flex justify-end pt-xs">
+                    <button
+                      onClick={handleSavePermissions}
+                      disabled={isSavingPermissions}
+                      className="bg-primary hover:bg-primary/95 text-on-primary rounded-full px-lg py-sm font-label-md text-sm hover:shadow-md transition-all disabled:opacity-50 cursor-pointer flex items-center gap-xs border-none"
+                    >
+                      {isSavingPermissions ? (
+                        <>
+                          <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <span className="material-symbols-outlined text-[16px]">save</span>
+                          Save Permissions
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            <div className="p-md border-t border-outline-variant flex justify-end shrink-0 bg-surface-container-lowest">
+              <button
+                onClick={() => setIsShareModalOpen(false)}
+                className="bg-surface-container-high border border-outline-variant text-on-surface rounded-full px-lg py-sm font-label-md text-sm hover:bg-surface-container transition-all cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

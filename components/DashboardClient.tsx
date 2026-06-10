@@ -51,9 +51,7 @@ export default function DashboardClient({
   const [newSubjectTitle, setNewSubjectTitle] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // States for search-and-store
-  const [displayedSubjects, setDisplayedSubjects] = useState<SubjectData[]>(subjects);
-  const [displayedNotes, setDisplayedNotes] = useState<NoteData[]>(notes);
+  // State for search popover only — does NOT affect the dashboard content
   const [searching, setSearching] = useState(false);
   const [searchResults, setSearchResults] = useState<{
     subjects: any[];
@@ -106,19 +104,9 @@ export default function DashboardClient({
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
-  useEffect(() => {
-    setDisplayedSubjects(subjects);
-  }, [subjects]);
-
-  useEffect(() => {
-    setDisplayedNotes(notes);
-  }, [notes]);
-
   const handleSearchChange = (val: string) => {
     setSearchQuery(val);
     if (!val.trim()) {
-      setDisplayedSubjects(subjects);
-      setDisplayedNotes(notes);
       setSearchResults({ subjects: [], chapters: [], notes: [] });
       setPopoverOpen(false);
     }
@@ -147,28 +135,8 @@ export default function DashboardClient({
     if (e) e.preventDefault();
     const cleanQuery = searchQuery.trim();
     if (!cleanQuery) return;
-
-    setSearching(true);
-    try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(cleanQuery)}`);
-      if (!res.ok) throw new Error("Search failed");
-      const data = await res.json();
-      
-      setDisplayedSubjects(data.subjects);
-      setDisplayedNotes(data.notes);
-
-      // If a note with the exact title is returned, redirect to its editor
-      const exactNote = data.notes.find(
-        (n: any) => n.title.toLowerCase() === cleanQuery.toLowerCase()
-      );
-      if (exactNote) {
-        router.push(`/note/${exactNote.id}`);
-      }
-    } catch (err) {
-      console.error("Failed to perform backend search and store:", err);
-    } finally {
-      setSearching(false);
-    }
+    // On submit — just open the popover if there are results, don't alter dashboard
+    setPopoverOpen(true);
   };
 
   // Helper to resolve HSL colors and icons for subjects
@@ -287,16 +255,10 @@ export default function DashboardClient({
     }
   };
 
-  const filteredNotes = displayedNotes.filter(
-    (note) =>
-      note.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      note.subjectTitle.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const filteredSubjects = displayedSubjects.filter(
-    (subj) =>
-      subj.title.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Dashboard always shows ALL subjects and notes regardless of search state
+  // Search results appear only in the popover dropdown
+  const filteredNotes = notes;
+  const filteredSubjects = subjects;
 
   return (
     <div className="bg-background text-on-background font-body-md h-screen flex overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
@@ -360,7 +322,7 @@ export default function DashboardClient({
                     </div>
                   ) : (searchResults.subjects.length === 0 && searchResults.chapters.length === 0 && searchResults.notes.length === 0) ? (
                     <div className="p-md text-sm text-secondary italic text-center">
-                      No matches found. Press Enter to create a note.
+                      No matches found for &quot;{searchQuery}&quot;.
                     </div>
                   ) : (
                     <>
@@ -427,12 +389,14 @@ export default function DashboardClient({
                                 onClick={() => setPopoverOpen(false)}
                                 className="flex items-center gap-md px-md py-2 hover:bg-surface-container-low rounded-xl transition-colors group outline-none"
                               >
-                                <span className="material-symbols-outlined text-secondary text-[18px] group-hover:text-primary transition-colors">description</span>
+                                <span className="material-symbols-outlined text-secondary text-[18px] group-hover:text-primary transition-colors shrink-0">description</span>
                                 <div className="flex flex-col min-w-0">
                                   <span className="font-body-md font-semibold text-on-surface group-hover:text-primary transition-colors truncate">
-                                    {note.subjectTitle} / {note.chapterTitle} / {note.title}
+                                    {note.title}
                                   </span>
-                                  <span className="text-[10px] text-outline font-label-sm">found in subject/chapter/notes</span>
+                                  <span className="text-[10px] text-outline font-label-sm truncate">
+                                    {note.subjectTitle} / {note.chapterTitle}
+                                  </span>
                                 </div>
                               </Link>
                             ))}
@@ -449,7 +413,6 @@ export default function DashboardClient({
           {/* Desktop Nav Links */}
           <nav className="hidden lg:flex items-center gap-lg">
             <button onClick={() => setActiveTab("dashboard")} className="font-label-md text-primary font-bold hover:text-primary transition-colors">
-              Notes
             </button>
           </nav>
 
