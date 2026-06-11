@@ -153,6 +153,8 @@ console.log("NOTE CONTENT:", note.content);
       ownerName={note.chapter?.subject?.owner?.name || "Owner"}
       ownerImageUrl={note.chapter?.subject?.owner?.imageUrl || null}
       ownerClerkId={note.chapter?.subject?.owner?.clerkId || ""}
+      joinedViaLink={collaborator ? collaborator.joinedViaLink : false}
+      baseCollaboratorRole={collaborator ? collaborator.role : "VIEW"}
     />
   );
 }

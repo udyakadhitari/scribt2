@@ -146,6 +146,8 @@ export default function NoteEditorClient({
   ownerName = "Owner",
   ownerImageUrl = null,
   ownerClerkId,
+  joinedViaLink = false,
+  baseCollaboratorRole = "VIEW",
 }: {
   note: NoteData;
   initialRole?: "VIEW" | "COMMENT" | "EDIT";
@@ -156,6 +158,8 @@ export default function NoteEditorClient({
   ownerName?: string;
   ownerImageUrl?: string | null;
   ownerClerkId?: string;
+  joinedViaLink?: boolean;
+  baseCollaboratorRole?: "VIEW" | "COMMENT" | "EDIT";
 }) {
   const router = useRouter();
   const { user } = useUser();
@@ -185,6 +189,17 @@ export default function NoteEditorClient({
   const [generalAccess, setGeneralAccess] = useState<"RESTRICTED" | "ANYONE">(note.generalAccess || "RESTRICTED");
   const [publicRole, setPublicRole] = useState<"VIEW" | "COMMENT" | "EDIT">(note.publicRole || "VIEW");
   const [isUpdatingGeneralAccess, setIsUpdatingGeneralAccess] = useState(false);
+  const [localJoinedViaLink, setLocalJoinedViaLink] = useState(joinedViaLink);
+  const joinedViaLinkRef = useRef(localJoinedViaLink);
+  useEffect(() => {
+    joinedViaLinkRef.current = localJoinedViaLink;
+  }, [localJoinedViaLink]);
+
+  const [localBaseRole, setLocalBaseRole] = useState(baseCollaboratorRole);
+  const baseRoleRef = useRef(localBaseRole);
+  useEffect(() => {
+    baseRoleRef.current = localBaseRole;
+  }, [localBaseRole]);
   const [collaborators, setCollaborators] = useState<any[]>([]);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"VIEW" | "COMMENT" | "EDIT">("VIEW");
@@ -293,6 +308,8 @@ export default function NoteEditorClient({
       if (activeUser && activeUser.id === data.clerkId) {
         console.log("[socket] Matching user! Updating local role to:", data.role);
         setRole(data.role);
+        setLocalJoinedViaLink(false); // Manually managed now
+        setLocalBaseRole(data.role); // Update base role
         toast(`Your permission was updated to ${data.role} by the owner.`, {
           icon: '🔒',
         });
@@ -312,21 +329,43 @@ export default function NoteEditorClient({
     });
 
     // Real-time: receive note access updates (generalAccess & publicRole)
-    socket.on("note-access-updated", async (data: { generalAccess: "RESTRICTED" | "ANYONE"; publicRole: "VIEW" | "COMMENT" | "EDIT" }) => {
+    socket.on("note-access-updated", (data: { generalAccess: "RESTRICTED" | "ANYONE"; publicRole: "VIEW" | "COMMENT" | "EDIT" }) => {
       console.log("[socket] note-access-updated received:", data);
       const activeUser = userRef.current;
       const isOwner = ownerClerkId === activeUser?.id;
       if (!isOwner) {
-        // Re-fetch current user's role from server based on updated settings
-        const newRole = await getCurrentUserRole(note.id);
-        if (!newRole) {
-          toast.error("Your access to this note has been revoked.");
-          router.push("/dashboard");
+        const getHigherPermission = (p1: "VIEW" | "COMMENT" | "EDIT", p2: "VIEW" | "COMMENT" | "EDIT"): "VIEW" | "COMMENT" | "EDIT" => {
+          const weights = { VIEW: 1, COMMENT: 2, EDIT: 3 };
+          return weights[p1] >= weights[p2] ? p1 : p2;
+        };
+
+        const viaLink = joinedViaLinkRef.current;
+        const baseRole = baseRoleRef.current;
+
+        if (viaLink) {
+          if (data.generalAccess === "ANYONE") {
+            setRole(data.publicRole);
+            toast(`Note permissions updated. Your current access level is: ${data.publicRole}`, {
+              icon: '🔒',
+            });
+          } else {
+            toast.error("Your access to this note has been revoked.");
+            router.push("/dashboard");
+          }
         } else {
-          setRole(newRole);
-          toast(`Note permissions updated. Your current access level is: ${newRole}`, {
-            icon: '🔒',
-          });
+          // Explicitly invited collaborators (joinedViaLink is false)
+          if (data.generalAccess === "ANYONE") {
+            const newRole = getHigherPermission(baseRole, data.publicRole);
+            setRole(newRole);
+            toast(`Note permissions updated. Your current access level is: ${newRole}`, {
+              icon: '🔒',
+            });
+          } else {
+            setRole(baseRole);
+            toast(`Note permissions updated. Your current access level is: ${baseRole}`, {
+              icon: '🔒',
+            });
+          }
         }
       }
     });
