@@ -96,8 +96,9 @@ export async function updateNoteContent(noteId: string, title: string, content: 
   const isCollaborator = await prisma.collaborator.findFirst({
     where: { userId: dbUser.id, noteId: noteId, role: "EDIT" },
   });
+  const isAnyoneEdit = note.generalAccess === "ANYONE" && note.publicRole === "EDIT";
 
-  if (!isOwner && !isCollaborator) {
+  if (!isOwner && !isCollaborator && !isAnyoneEdit) {
     throw new Error("Unauthorized");
   }
 
@@ -624,8 +625,9 @@ export async function addComment(noteId: string, content: string) {
   const isCollaborator = await prisma.collaborator.findFirst({
     where: { userId: dbUser.id, noteId, role: { in: ["COMMENT", "EDIT"] } },
   });
+  const isAnyoneComment = note.generalAccess === "ANYONE" && (note.publicRole === "COMMENT" || note.publicRole === "EDIT");
 
-  if (!isOwner && !isCollaborator) {
+  if (!isOwner && !isCollaborator && !isAnyoneComment) {
     throw new Error("Unauthorized");
   }
 

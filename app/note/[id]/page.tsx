@@ -55,10 +55,30 @@ export default async function NotePage({ params }: PageProps) {
 
   let activeRole: "VIEW" | "COMMENT" | "EDIT" = "VIEW";
 
+  const getHigherPermission = (p1: "VIEW" | "COMMENT" | "EDIT", p2: "VIEW" | "COMMENT" | "EDIT"): "VIEW" | "COMMENT" | "EDIT" => {
+    const weights = { VIEW: 1, COMMENT: 2, EDIT: 3 };
+    return weights[p1] >= weights[p2] ? p1 : p2;
+  };
+
   if (isOwner) {
     activeRole = "EDIT";
   } else if (collaborator) {
-    activeRole = collaborator.role;
+    if (note.generalAccess === "ANYONE") {
+      activeRole = getHigherPermission(collaborator.role, note.publicRole);
+      // Sync DB collaborator role if it is lower than the updated public link permission
+      if (collaborator.role !== activeRole) {
+        try {
+          await prisma.collaborator.update({
+            where: { id: collaborator.id },
+            data: { role: activeRole },
+          });
+        } catch (e) {
+          console.error("Failed to update collaborator role to higher public role:", e);
+        }
+      }
+    } else {
+      activeRole = collaborator.role;
+    }
   } else if (note.generalAccess === "ANYONE") {
     activeRole = note.publicRole;
     // Auto-register this logged-in user as a collaborator so they appear in the UI list
