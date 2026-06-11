@@ -119,6 +119,14 @@ app.prepare().then(() => {
       });
     });
 
+    // Real-time: update note access (generalAccess & publicRole)
+    socket.on("update-note-access", (data: { noteId: string; generalAccess: "RESTRICTED" | "ANYONE"; publicRole: "VIEW" | "COMMENT" | "EDIT" }) => {
+      socket.to(`note:${data.noteId}`).emit("note-access-updated", {
+        generalAccess: data.generalAccess,
+        publicRole: data.publicRole
+      });
+    });
+
     socket.on("disconnect", () => {
       console.log(`[socket.io] Client disconnected: ${socket.id}`);
     });

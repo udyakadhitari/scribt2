@@ -24,7 +24,7 @@ export default function ForbiddenPage() {
       <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-primary/5 rounded-full blur-[120px] pointer-events-none" />
 
       {/* Main glassmorphism card */}
-      <div className="bg-surface-container-low/80 border border-outline-variant backdrop-blur-lg rounded-3xl p-xl max-w-md w-full text-center shadow-ambient-raised flex flex-col items-center gap-md z-10 transition-all duration-300 hover:shadow-ambient-overlay">
+      <div className="bg-surface-container-low/80 border border-outline-variant backdrop-blur-lg rounded-3xl p-xl max-w-2xl w-full text-center shadow-ambient-raised flex flex-col items-center gap-md z-10 transition-all duration-300 hover:shadow-ambient-overlay">
         {/* Animated glowing warning icon */}
         <div className="w-16 h-16 rounded-full bg-error/10 flex items-center justify-center text-error mb-sm animate-pulse shadow-[0_0_24px_rgba(var(--color-error-rgb,211,47,47),0.15)]">
           <span className="material-symbols-outlined text-[36px] font-bold">gpp_bad</span>

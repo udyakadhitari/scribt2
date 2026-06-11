@@ -795,4 +795,36 @@ export async function removeCollaborator(noteId: string, collaboratorId: string)
   return deleted;
 }
 
+export async function getCurrentUserRole(noteId: string) {
+  const dbUser = await checkAndSyncUser();
+  if (!dbUser) return null;
+
+  const note = await prisma.note.findUnique({
+    where: { id: noteId },
+    include: { chapter: { include: { subject: true } } },
+  });
+  if (!note) return null;
+
+  const isOwner = note.chapter?.subject?.ownerId === dbUser.id;
+  if (isOwner) return "EDIT";
+
+  const collaborator = await prisma.collaborator.findFirst({
+    where: { noteId, userId: dbUser.id },
+  });
+
+  if (collaborator) {
+    if (note.generalAccess === "ANYONE") {
+      const weights = { VIEW: 1, COMMENT: 2, EDIT: 3 };
+      return weights[collaborator.role] >= weights[note.publicRole] ? collaborator.role : note.publicRole;
+    }
+    return collaborator.role;
+  }
+
+  if (note.generalAccess === "ANYONE") {
+    return note.publicRole;
+  }
+
+  return null;
+}
+
 

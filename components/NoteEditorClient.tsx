@@ -20,7 +20,8 @@ import {
   updateCollaboratorRole,
   removeCollaborator,
   updateNoteGeneralAccess,
-  inviteCollaborator
+  inviteCollaborator,
+  getCurrentUserRole
 } from "@/lib/actions";
 import toast from "react-hot-toast";
 import { useEditor } from "@tiptap/react";
@@ -310,6 +311,26 @@ export default function NoteEditorClient({
       }
     });
 
+    // Real-time: receive note access updates (generalAccess & publicRole)
+    socket.on("note-access-updated", async (data: { generalAccess: "RESTRICTED" | "ANYONE"; publicRole: "VIEW" | "COMMENT" | "EDIT" }) => {
+      console.log("[socket] note-access-updated received:", data);
+      const activeUser = userRef.current;
+      const isOwner = ownerClerkId === activeUser?.id;
+      if (!isOwner) {
+        // Re-fetch current user's role from server based on updated settings
+        const newRole = await getCurrentUserRole(note.id);
+        if (!newRole) {
+          toast.error("Your access to this note has been revoked.");
+          router.push("/dashboard");
+        } else {
+          setRole(newRole);
+          toast(`Note permissions updated. Your current access level is: ${newRole}`, {
+            icon: '🔒',
+          });
+        }
+      }
+    });
+
     return () => {
       socket.emit("leave-note", note.id);
       socket.disconnect();
@@ -455,6 +476,14 @@ export default function NoteEditorClient({
       await updateNoteGeneralAccess(note.id, access, role);
       setGeneralAccess(access);
       setPublicRole(role);
+
+      // Emit socket event to notify other live collaborators
+      socketRef.current?.emit("update-note-access", {
+        noteId: note.id,
+        generalAccess: access,
+        publicRole: role,
+      });
+
       toast.success("General access settings updated!");
     } catch (err) {
       toast.error("Failed to update general access settings.");
