@@ -169,6 +169,7 @@ model Collaborator {
   role        Permission
 
   invitedBy   String
+  joinedViaLink Boolean @default(false)
 
   createdAt   DateTime @default(now())
 

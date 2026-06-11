@@ -766,7 +766,7 @@ export async function updateCollaboratorRole(noteId: string, collaboratorId: str
 
   const updated = await prisma.collaborator.update({
     where: { id: collaboratorId },
-    data: { role },
+    data: { role, joinedViaLink: false },
   });
 
   revalidatePath(`/note/${noteId}`);
@@ -813,6 +813,25 @@ export async function getCurrentUserRole(noteId: string) {
   });
 
   if (collaborator) {
+    if (collaborator.joinedViaLink) {
+      if (note.generalAccess === "ANYONE") {
+        // Sync role to publicRole if it changed
+        if (collaborator.role !== note.publicRole) {
+          try {
+            await prisma.collaborator.update({
+              where: { id: collaborator.id },
+              data: { role: note.publicRole },
+            });
+          } catch (e) {
+            console.error("Failed to sync collaborator role to publicRole:", e);
+          }
+        }
+        return note.publicRole;
+      }
+      return null; // General access restricted, so link-joined collaborator loses access
+    }
+
+    // Explicitly invited collaborators (joinedViaLink is false)
     if (note.generalAccess === "ANYONE") {
       const weights = { VIEW: 1, COMMENT: 2, EDIT: 3 };
       return weights[collaborator.role] >= weights[note.publicRole] ? collaborator.role : note.publicRole;

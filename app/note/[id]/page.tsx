@@ -63,25 +63,36 @@ export default async function NotePage({ params }: PageProps) {
   if (isOwner) {
     activeRole = "EDIT";
   } else if (collaborator) {
-    if (note.generalAccess === "ANYONE") {
-      activeRole = getHigherPermission(collaborator.role, note.publicRole);
-      // Sync DB collaborator role if it is lower than the updated public link permission
-      if (collaborator.role !== activeRole) {
-        try {
-          await prisma.collaborator.update({
-            where: { id: collaborator.id },
-            data: { role: activeRole },
-          });
-        } catch (e) {
-          console.error("Failed to update collaborator role to higher public role:", e);
+    if (collaborator.joinedViaLink) {
+      // Auto-registered collaborators only get access if General Access is ANYONE
+      if (note.generalAccess === "ANYONE") {
+        activeRole = note.publicRole;
+        // Keep DB collaborator role synchronized with current publicRole
+        if (collaborator.role !== note.publicRole) {
+          try {
+            await prisma.collaborator.update({
+              where: { id: collaborator.id },
+              data: { role: note.publicRole },
+            });
+          } catch (e) {
+            console.error("Failed to sync collaborator role to publicRole:", e);
+          }
         }
+      } else {
+        // General access is restricted, so this public link user loses access
+        redirect("/forbidden");
       }
     } else {
-      activeRole = collaborator.role;
+      // Explicitly invited collaborators (joinedViaLink is false)
+      if (note.generalAccess === "ANYONE") {
+        activeRole = getHigherPermission(collaborator.role, note.publicRole);
+      } else {
+        activeRole = collaborator.role;
+      }
     }
   } else if (note.generalAccess === "ANYONE") {
     activeRole = note.publicRole;
-    // Auto-register this logged-in user as a collaborator so they appear in the UI list
+    // Auto-register this logged-in user as a collaborator with joinedViaLink: true
     try {
       await prisma.collaborator.create({
         data: {
@@ -89,6 +100,7 @@ export default async function NotePage({ params }: PageProps) {
           noteId: id,
           role: note.publicRole,
           invitedBy: note.chapter?.subject?.ownerId || "system",
+          joinedViaLink: true,
         },
       });
     } catch (e) {
