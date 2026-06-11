@@ -4,7 +4,7 @@ import { prisma } from "./prisma";
 import { checkAndSyncUser } from "./user";
 import { revalidatePath } from "next/cache";
 import { generateSecureToken } from "./share";
-import { Permission } from "@prisma/client";
+import { Permission, GeneralAccess } from "@prisma/client";
 
 export async function createSubject(title: string, color?: string) {
   const dbUser = await checkAndSyncUser();
@@ -420,6 +420,85 @@ export async function createShareLink(noteId: string, permission: Permission, ex
   });
 
   return shareLink;
+}
+
+export async function updateNoteGeneralAccess(
+  noteId: string,
+  generalAccess: GeneralAccess,
+  publicRole: Permission
+) {
+  const dbUser = await checkAndSyncUser();
+  if (!dbUser) throw new Error("Unauthorized");
+
+  // Verify ownership of the note
+  const note = await prisma.note.findUnique({
+    where: { id: noteId },
+    include: { chapter: { include: { subject: true } } },
+  });
+  if (!note || note.chapter.subject.ownerId !== dbUser.id) {
+    throw new Error("Unauthorized");
+  }
+
+  const updated = await prisma.note.update({
+    where: { id: noteId },
+    data: {
+      generalAccess,
+      publicRole,
+    },
+  });
+
+  revalidatePath(`/note/${noteId}`);
+  return updated;
+}
+
+export async function inviteCollaborator(noteId: string, email: string, role: Permission) {
+  const dbUser = await checkAndSyncUser();
+  if (!dbUser) throw new Error("Unauthorized");
+
+  // Verify ownership of the note
+  const note = await prisma.note.findUnique({
+    where: { id: noteId },
+    include: { chapter: { include: { subject: true } } },
+  });
+  if (!note || note.chapter.subject.ownerId !== dbUser.id) {
+    throw new Error("Unauthorized");
+  }
+
+  // Find the target user by email
+  const targetUser = await prisma.user.findUnique({
+    where: { email },
+  });
+  if (!targetUser) {
+    throw new Error("User with this email not found");
+  }
+
+  if (targetUser.id === dbUser.id) {
+    throw new Error("You cannot invite yourself");
+  }
+
+  // Check if already a collaborator
+  const existing = await prisma.collaborator.findFirst({
+    where: { noteId, userId: targetUser.id },
+  });
+
+  if (existing) {
+    const updated = await prisma.collaborator.update({
+      where: { id: existing.id },
+      data: { role },
+    });
+    return updated;
+  }
+
+  const created = await prisma.collaborator.create({
+    data: {
+      userId: targetUser.id,
+      noteId,
+      role,
+      invitedBy: dbUser.id,
+    },
+  });
+
+  return created;
 }
 
 export async function getShareLinkByToken(token: string) {

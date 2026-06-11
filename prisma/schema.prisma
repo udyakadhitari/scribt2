@@ -73,6 +73,9 @@ model Note {
   collaborators Collaborator[]
   comments      Comment[]
 
+  generalAccess GeneralAccess @default(RESTRICTED)
+  publicRole    Permission    @default(VIEW)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -190,4 +193,9 @@ model Comment {
 
   @@index([noteId])
   @@index([userId])
+}
+
+enum GeneralAccess {
+  RESTRICTED
+  ANYONE
 }

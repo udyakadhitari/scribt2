@@ -18,7 +18,9 @@ import {
   getCollaborators,
   copySharedNote,
   updateCollaboratorRole,
-  removeCollaborator
+  removeCollaborator,
+  updateNoteGeneralAccess,
+  inviteCollaborator
 } from "@/lib/actions";
 import toast from "react-hot-toast";
 import { useEditor } from "@tiptap/react";
@@ -69,6 +71,8 @@ interface NoteData {
   subjectTitle: string;
   subjectId: string;
   chats: NoteChatData[];
+  generalAccess?: "RESTRICTED" | "ANYONE";
+  publicRole?: "VIEW" | "COMMENT" | "EDIT";
 }
 
 interface CommentData {
@@ -177,11 +181,13 @@ export default function NoteEditorClient({
   }, [role]);
   const [comments, setComments] = useState<CommentData[]>(initialComments);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [shareLinks, setShareLinks] = useState<any[]>([]);
+  const [generalAccess, setGeneralAccess] = useState<"RESTRICTED" | "ANYONE">(note.generalAccess || "RESTRICTED");
+  const [publicRole, setPublicRole] = useState<"VIEW" | "COMMENT" | "EDIT">(note.publicRole || "VIEW");
+  const [isUpdatingGeneralAccess, setIsUpdatingGeneralAccess] = useState(false);
   const [collaborators, setCollaborators] = useState<any[]>([]);
-  const [isGeneratingLink, setIsGeneratingLink] = useState(false);
-  const [newSharePermission, setNewSharePermission] = useState<"VIEW" | "COMMENT" | "EDIT">("VIEW");
-  const [newShareExpiry, setNewShareExpiry] = useState<string>("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"VIEW" | "COMMENT" | "EDIT">("VIEW");
+  const [isInviting, setIsInviting] = useState(false);
   const [isCommentsPanelOpen, setIsCommentsPanelOpen] = useState(initialRole === "COMMENT");
   const isCommentsPanelOpenRef = useRef(isCommentsPanelOpen);
   useEffect(() => {
@@ -374,11 +380,7 @@ export default function NoteEditorClient({
     setIsLoadingShareData(true);
     setPendingRoles({});
     try {
-      const [links, collabs] = await Promise.all([
-        getShareLinks(note.id),
-        getCollaborators(note.id),
-      ]);
-      setShareLinks(links);
+      const collabs = await getCollaborators(note.id);
       setCollaborators(collabs);
     } catch (err) {
       console.error("Failed to load share data:", err);
@@ -392,23 +394,20 @@ export default function NoteEditorClient({
     loadShareData();
   };
 
-  const handleGenerateShareLink = async () => {
-    setIsGeneratingLink(true);
+  const handleInviteCollaborator = async () => {
+    if (!inviteEmail.trim()) return;
+    setIsInviting(true);
     try {
-      await createShareLink(
-        note.id,
-        newSharePermission,
-        newShareExpiry || null
-      );
-      toast.success("Share link generated!");
-      // Reload links
-      const links = await getShareLinks(note.id);
-      setShareLinks(links);
-      setNewShareExpiry("");
-    } catch (err) {
-      toast.error("Failed to generate share link");
+      await inviteCollaborator(note.id, inviteEmail.trim(), inviteRole);
+      toast.success("Collaborator invited successfully!");
+      setInviteEmail("");
+      // Reload collaborators list
+      const collabs = await getCollaborators(note.id);
+      setCollaborators(collabs);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to invite collaborator");
     } finally {
-      setIsGeneratingLink(false);
+      setIsInviting(false);
     }
   };
 
@@ -450,6 +449,20 @@ export default function NoteEditorClient({
     }
   };
 
+  const handleUpdateGeneralAccess = async (access: "RESTRICTED" | "ANYONE", role: "VIEW" | "COMMENT" | "EDIT") => {
+    setIsUpdatingGeneralAccess(true);
+    try {
+      await updateNoteGeneralAccess(note.id, access, role);
+      setGeneralAccess(access);
+      setPublicRole(role);
+      toast.success("General access settings updated!");
+    } catch (err) {
+      toast.error("Failed to update general access settings.");
+    } finally {
+      setIsUpdatingGeneralAccess(false);
+    }
+  };
+
   const handleRemoveCollaborator = async (collabId: string) => {
     if (confirm("Are you sure you want to remove this collaborator?")) {
       try {
@@ -467,19 +480,6 @@ export default function NoteEditorClient({
       } catch (err) {
         toast.error("Failed to remove collaborator");
         console.error(err);
-      }
-    }
-  };
-
-  const handleDeleteShareLink = async (linkId: string) => {
-    if (confirm("Are you sure you want to deactivate this share link?")) {
-      try {
-        await deleteShareLink(linkId);
-        toast.success("Share link deactivated");
-        const links = await getShareLinks(note.id);
-        setShareLinks(links);
-      } catch (err) {
-        toast.error("Failed to deactivate share link");
       }
     }
   };
@@ -3964,126 +3964,128 @@ export default function NoteEditorClient({
 
             {/* Scrollable Body */}
             <div className="p-md overflow-y-auto flex-grow space-y-lg">
-              {/* Generate New Link Form */}
-              <div className="bg-surface-container-low border border-outline-variant/60 rounded-xl p-sm flex flex-col gap-sm">
-                <h3 className="font-label-lg text-label-lg text-center font-bold text-on-surface">Generate Share Link</h3>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-sm">
-                  {/* Permission selector */}
-                  <div className="flex flex-col gap-xs">
-                    <label className="text-[11px] font-bold text-outline uppercase">Permission</label>
-                    <select
-                      className="bg-surface border border-outline-variant rounded-xl p-2 text-sm focus:border-primary focus:outline-none text-on-surface cursor-pointer"
-                      value={newSharePermission}
-                      onChange={(e) => setNewSharePermission(e.target.value as any)}
-                    >
-                      <option value="VIEW">VIEW (Read-only)</option>
-                      <option value="COMMENT">COMMENT (Read & Comment)</option>
-                      <option value="EDIT">EDIT (Full Edit Access)</option>
-                    </select>
-                  </div>
-
-                  {/* Expiration selector */}
-                  <div className="flex flex-col gap-xs">
-                    <label className="text-[11px] font-bold text-outline uppercase">Expires At (Optional)</label>
+              {/* Invite Collaborators */}
+              <div className="bg-surface-container-low border border-outline-variant/60 rounded-xl p-md flex flex-col gap-sm">
+                <h3 className="font-label-lg text-label-lg font-bold text-on-surface flex items-center gap-xs">
+                  <span className="material-symbols-outlined text-[18px] text-primary">person_add</span>
+                  Invite Collaborators
+                </h3>
+                <div className="flex flex-col sm:flex-row gap-sm items-end sm:items-center">
+                  <div className="flex-1 w-full flex flex-col gap-xs">
+                    <label className="text-[11px] font-bold text-outline uppercase tracking-wider">Email Address</label>
                     <input
-                      type="datetime-local"
-                      className="bg-surface border border-outline-variant rounded-xl p-2 text-sm focus:border-primary focus:outline-none text-on-surface cursor-pointer"
-                      value={newShareExpiry}
-                      onChange={(e) => setNewShareExpiry(e.target.value)}
+                      type="email"
+                      placeholder="collaborator@example.com"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      className="bg-surface border border-outline-variant rounded-xl p-2.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary/20 focus:outline-none text-on-surface w-full transition-all"
                     />
                   </div>
-                </div>
-
-                <div className="flex justify-center mt-xs">
+                  <div className="w-full sm:w-auto flex flex-col gap-xs shrink-0">
+                    <label className="text-[11px] font-bold text-outline uppercase tracking-wider">Role</label>
+                    <select
+                      value={inviteRole}
+                      onChange={(e) => setInviteRole(e.target.value as any)}
+                      className="bg-surface border border-outline-variant rounded-xl p-2.5 text-sm focus:border-primary focus:outline-none text-on-surface cursor-pointer min-w-[120px]"
+                    >
+                      <option value="VIEW">Viewer</option>
+                      <option value="COMMENT">Commenter</option>
+                      <option value="EDIT">Editor</option>
+                    </select>
+                  </div>
                   <button
-                    onClick={handleGenerateShareLink}
-                    disabled={isGeneratingLink}
-                    className="bg-primary text-on-primary rounded-full px-md py-sm font-label-md text-sm hover:bg-surface-tint transition-all disabled:opacity-50 cursor-pointer border-none"
+                    onClick={handleInviteCollaborator}
+                    disabled={isInviting || !inviteEmail.trim()}
+                    className="bg-primary text-on-primary rounded-xl px-md py-[11px] font-label-md text-sm hover:bg-surface-tint hover:shadow-md transition-all disabled:opacity-50 cursor-pointer border-none shrink-0 w-full sm:w-auto flex items-center justify-center gap-xs font-semibold"
                   >
-                    {isGeneratingLink ? "Generating..." : "Generate Link"}
+                    {isInviting ? (
+                      <>
+                        <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                        Inviting...
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-[16px]">send</span>
+                        Invite
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
 
-              {/* Active Links list */}
-              <div className="space-y-sm">
+              {/* General Access */}
+              <div className="bg-surface-container-low border border-outline-variant/60 rounded-xl p-md flex flex-col gap-sm">
                 <h3 className="font-label-lg text-label-lg font-bold text-on-surface flex items-center gap-xs">
-                  <span className="material-symbols-outlined text-[16px] text-secondary">link</span>
-                  Active Share Links
+                  <span className="material-symbols-outlined text-[18px] text-primary">public</span>
+                  General Access
                 </h3>
                 
-                {isLoadingShareData ? (
-                  <div className="space-y-xs animate-pulse">
-                    {[1, 2].map((i) => (
-                      <div key={i} className="border border-outline-variant/60 rounded-xl p-sm flex flex-col gap-xs bg-surface-container-lowest">
-                        <div className="flex items-center justify-between">
-                          <div className="h-4 w-12 bg-outline-variant/40 rounded-full" />
-                          <div className="h-3.5 w-24 bg-outline-variant/30 rounded" />
-                        </div>
-                        <div className="flex items-center gap-xs mt-1">
-                          <div className="flex-1 h-8 bg-outline-variant/20 rounded-lg" />
-                          <div className="w-8 h-8 bg-outline-variant/20 rounded-full" />
-                          <div className="w-8 h-8 bg-outline-variant/20 rounded-full" />
-                        </div>
+                <div className="flex flex-col gap-md">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-sm border-b border-outline-variant/40 pb-sm">
+                    <div className="flex items-start gap-sm">
+                      <span className="material-symbols-outlined text-[24px] text-secondary mt-0.5">
+                        {generalAccess === "RESTRICTED" ? "lock" : "public"}
+                      </span>
+                      <div className="flex flex-col">
+                        <span className="font-semibold text-sm text-on-surface">
+                          {generalAccess === "RESTRICTED" ? "Restricted" : "Anyone with the link"}
+                        </span>
+                        <span className="text-xs text-outline">
+                          {generalAccess === "RESTRICTED" 
+                            ? "Only people added can open with this link" 
+                            : "Anyone on the internet with this link can view, comment, or edit"
+                          }
+                        </span>
                       </div>
-                    ))}
+                    </div>
+                    
+                    <div className="flex items-center gap-sm shrink-0">
+                      <select
+                        value={generalAccess}
+                        onChange={(e) => handleUpdateGeneralAccess(e.target.value as any, publicRole)}
+                        disabled={isUpdatingGeneralAccess}
+                        className="bg-surface border border-outline-variant rounded-xl p-2 text-xs font-semibold focus:border-primary focus:outline-none text-on-surface cursor-pointer"
+                      >
+                        <option value="RESTRICTED">Restricted</option>
+                        <option value="ANYONE">Anyone with the link</option>
+                      </select>
+
+                      {generalAccess === "ANYONE" && (
+                        <select
+                          value={publicRole}
+                          onChange={(e) => handleUpdateGeneralAccess(generalAccess, e.target.value as any)}
+                          disabled={isUpdatingGeneralAccess}
+                          className="bg-surface border border-outline-variant rounded-xl p-2 text-xs font-semibold focus:border-primary focus:outline-none text-on-surface cursor-pointer"
+                        >
+                          <option value="VIEW">Viewer</option>
+                          <option value="COMMENT">Commenter</option>
+                          <option value="EDIT">Editor</option>
+                        </select>
+                      )}
+                    </div>
                   </div>
-                ) : shareLinks.length === 0 ? (
-                  <p className="text-xs text-outline italic">No active share links. Generate one above to share.</p>
-                ) : (
-                  <div className="space-y-xs">
-                    {shareLinks.map((link) => {
-                      const shareUrl = `${window.location.origin}/share/${link.token}`;
-                      return (
-                        <div key={link.id} className="border border-outline-variant rounded-xl p-sm flex flex-col gap-xs bg-surface-container-lowest">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className={`px-2 py-0.5 rounded-full font-bold uppercase tracking-wider text-[9px] ${
-                              link.permission === "EDIT" 
-                                ? "bg-primary/15 text-primary" 
-                                : link.permission === "COMMENT"
-                                ? "bg-secondary/15 text-secondary"
-                                : "bg-outline/15 text-outline"
-                            }`}>
-                              {link.permission}
-                            </span>
-                            <span className="text-outline text-[10px]">
-                              {link.expiresAt 
-                                ? `Expires: ${new Date(link.expiresAt).toLocaleString()}` 
-                                : "Never expires"
-                              }
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-xs mt-1">
-                            <input
-                              type="text"
-                              readOnly
-                              value={shareUrl}
-                              className="bg-surface-container border border-outline-variant/60 rounded-lg p-2 text-xs font-mono flex-1 text-on-surface select-all"
-                            />
-                            <button
-                              onClick={() => {
-                                navigator.clipboard.writeText(shareUrl);
-                                toast.success("Copied to clipboard!");
-                              }}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-surface-container text-secondary hover:text-primary transition-all cursor-pointer border-none bg-transparent"
-                              title="Copy link"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">content_copy</span>
-                            </button>
-                            <button
-                              onClick={() => handleDeleteShareLink(link.id)}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-error/10 text-secondary hover:text-error transition-all cursor-pointer border-none bg-transparent"
-                              title="Deactivate link"
-                            >
-                              <span className="material-symbols-outlined text-[18px]">link_off</span>
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+
+                  {/* Link Copy Bar */}
+                  <div className="flex items-center gap-xs bg-surface-container border border-outline-variant/60 rounded-xl p-sm">
+                    <span className="material-symbols-outlined text-[16px] text-outline ml-xs shrink-0">link</span>
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${window.location.origin}/note/${note.id}`}
+                      className="bg-transparent border-none focus:outline-none text-xs font-mono flex-1 text-on-surface select-all px-xs min-w-0"
+                    />
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}/note/${note.id}`);
+                        toast.success("Link copied to clipboard!");
+                      }}
+                      className="bg-primary/10 hover:bg-primary/20 text-primary hover:text-primary-dark transition-all rounded-lg px-sm py-1.5 text-xs font-bold flex items-center gap-xs cursor-pointer border-none shrink-0"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">content_copy</span>
+                      Copy Link
+                    </button>
                   </div>
-                )}
+                </div>
               </div>
 
               {/* Collaborators list */}

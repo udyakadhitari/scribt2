@@ -44,7 +44,7 @@ export default async function NotePage({ params }: PageProps) {
     notFound();
   }
 
-  // Verify ownership or collaborator access
+  // Verify ownership, collaborator access, or general link access
   const isOwner = note.chapter?.subject?.ownerId === dbUser.id;
   const collaborator = await prisma.collaborator.findFirst({
     where: {
@@ -53,11 +53,30 @@ export default async function NotePage({ params }: PageProps) {
     },
   });
 
-  if (!isOwner && !collaborator) {
+  let activeRole: "VIEW" | "COMMENT" | "EDIT" = "VIEW";
+
+  if (isOwner) {
+    activeRole = "EDIT";
+  } else if (collaborator) {
+    activeRole = collaborator.role;
+  } else if (note.generalAccess === "ANYONE") {
+    activeRole = note.publicRole;
+    // Auto-register this logged-in user as a collaborator so they appear in the UI list
+    try {
+      await prisma.collaborator.create({
+        data: {
+          userId: dbUser.id,
+          noteId: id,
+          role: note.publicRole,
+          invitedBy: note.chapter?.subject?.ownerId || "system",
+        },
+      });
+    } catch (e) {
+      console.error("Failed to auto-register public collaborator:", e);
+    }
+  } else {
     redirect("/forbidden");
   }
-
-  const activeRole = isOwner ? "EDIT" : (collaborator?.role || "VIEW");
 
   // Fetch comments to pass down
   const comments = await prisma.comment.findMany({
@@ -85,6 +104,8 @@ console.log("NOTE CONTENT:", note.content);
           role: c.role,
           content: c.content,
         })) || [],
+        generalAccess: note.generalAccess,
+        publicRole: note.publicRole,
       }}
       initialRole={activeRole}
       initialComments={comments.map((c: any) => ({
