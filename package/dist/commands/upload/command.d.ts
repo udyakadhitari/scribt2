@@ -1,2 +1,0 @@
-import { type CommandDefinition } from '../../framework/CommandDefinition.js';
-export declare const command: CommandDefinition<any, any>;
