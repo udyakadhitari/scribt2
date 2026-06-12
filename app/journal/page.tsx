@@ -18,7 +18,7 @@ export default async function JournalPage() {
   });
 
   // Format date fields to be serializable strings
-  const formattedEntries = entries.map((entry) => ({
+  const formattedEntries = entries.map((entry: any) => ({
     id: entry.id,
     title: entry.title,
     content: entry.content,

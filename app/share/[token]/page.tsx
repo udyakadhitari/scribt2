@@ -150,7 +150,7 @@ export default async function SharePage({ params }: SharePageProps) {
         chapterTitle: note.chapter?.title || "Untitled Chapter",
         subjectTitle: note.chapter?.subject?.title || "Untitled Subject",
         subjectId: note.chapter?.subject?.id || "",
-        chats: note.chats?.map((c) => ({
+        chats: note.chats?.map((c: any) => ({
           role: c.role,
           content: c.content,
         })) || [],
