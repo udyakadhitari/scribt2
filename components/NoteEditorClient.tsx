@@ -256,9 +256,6 @@ export default function NoteEditorClient({
       socket.on("ydoc-update", (updateData: number[]) => {
         Y.applyUpdate(ydoc, new Uint8Array(updateData), "remote");
       });
-    };
-
-    initSocket();
 
       socket.on("awareness-update", (updateData: number[]) => {
         awarenessProtocol.applyAwarenessUpdate(awareness, new Uint8Array(updateData), "remote");
