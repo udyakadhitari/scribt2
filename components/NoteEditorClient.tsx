@@ -4,7 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { io, Socket } from "socket.io-client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { UserButton, useUser } from "@clerk/nextjs";
+import { UserButton, useUser, useAuth } from "@clerk/nextjs";
+import DOMPurify from "dompurify";
 import {
   updateNoteContent,
   deleteNote,
@@ -212,101 +213,118 @@ export default function NoteEditorClient({
     userRef.current = user;
   }, [user]);
 
+  const { getToken } = useAuth();
+
   // Connect socket and join note room
   useEffect(() => {
-    const socket = io({ path: "/api/socketio" });
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      socket.emit("join-note", note.id);
-      socket.emit("sync-room", { noteId: note.id });
-    });
-
-    socket.on("sync-room-response", (data: { empty: boolean; update?: number[] }) => {
-      if (data.empty) {
-        if (editorRef.current) {
-          editorRef.current.commands.setContent(initialContentRef.current, { emitUpdate: false });
-          const update = Y.encodeStateAsUpdate(ydoc);
-          socket.emit("ydoc-update", { noteId: note.id, update: Array.from(update) });
-        } else {
-          needsInitRef.current = true;
-        }
-      } else if (data.update) {
-        Y.applyUpdate(ydoc, new Uint8Array(data.update), "remote");
-      }
-
-      // Listen for local updates
-      ydoc.on("update", (update: Uint8Array, origin: any) => {
-        if (origin !== "remote" && roleRef.current === "EDIT") {
-          socket.emit("ydoc-update", { noteId: note.id, update: Array.from(update) });
-        }
+    let socket: Socket | null = null;
+    
+    const initSocket = async () => {
+      const token = await getToken();
+      socket = io({ 
+        path: "/api/socketio",
+        auth: { token }
       });
-    });
+      socketRef.current = socket;
 
-    socket.on("ydoc-update", (updateData: number[]) => {
-      Y.applyUpdate(ydoc, new Uint8Array(updateData), "remote");
-    });
-
-    socket.on("awareness-update", (updateData: number[]) => {
-      awarenessProtocol.applyAwarenessUpdate(awareness, new Uint8Array(updateData), "remote");
-    });
-
-    // Listen to local awareness updates and broadcast them
-    awareness.on("update", ({ added, updated, removed }: any, origin: any) => {
-      if (origin !== "remote") {
-        const changedClients = added.concat(updated).concat(removed);
-        const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients);
-        socket.emit("awareness-update", { noteId: note.id, update: Array.from(update) });
-      }
-    });
-
-    // Real-time: receive new comment from another user
-    socket.on("comment-added", (comment: CommentData) => {
-      setComments((prev) => {
-        if (prev.some((c) => c.id === comment.id)) return prev;
-        
-        if (!isCommentsPanelOpenRef.current) {
-          setTimeout(() => setUnreadCommentCount((c) => c + 1), 0);
-        }
-        
-        return [comment, ...prev];
+      socket.on("connect", () => {
+        socket!.emit("join-note", note.id);
+        socket!.emit("sync-room", { noteId: note.id });
       });
-    });
 
-    // Real-time: receive resolved comment from another user
-    socket.on("comment-resolved", (commentId: string) => {
-      setComments((prev) => prev.filter((c) => c.id !== commentId));
-    });
+      socket.on("sync-room-response", (data: { empty: boolean; update?: number[] }) => {
+        if (data.empty) {
+          if (editorRef.current) {
+            editorRef.current.commands.setContent(initialContentRef.current, { emitUpdate: false });
+            const update = Y.encodeStateAsUpdate(ydoc);
+            socket!.emit("ydoc-update", { noteId: note.id, update: Array.from(update) });
+          } else {
+            needsInitRef.current = true;
+          }
+        } else if (data.update) {
+          Y.applyUpdate(ydoc, new Uint8Array(data.update), "remote");
+        }
 
-    // Real-time: receive collaborator role updates
-    socket.on("collaborator-role-updated", (data: { clerkId: string; role: "VIEW" | "COMMENT" | "EDIT" }) => {
-      console.log("[socket] collaborator-role-updated received:", data);
-      const activeUser = userRef.current;
-      console.log("[socket] activeUser.id:", activeUser?.id, "data.clerkId:", data.clerkId);
-      if (activeUser && activeUser.id === data.clerkId) {
-        console.log("[socket] Matching user! Updating local role to:", data.role);
-        setRole(data.role);
-        toast(`Your permission was updated to ${data.role} by the owner.`, {
-          icon: '🔒',
+        // Listen for local updates
+        ydoc.on("update", (update: Uint8Array, origin: any) => {
+          if (origin !== "remote" && roleRef.current === "EDIT") {
+            socket!.emit("ydoc-update", { noteId: note.id, update: Array.from(update) });
+          }
         });
-      }
-    });
+      });
 
-    // Real-time: receive collaborator removal
-    socket.on("collaborator-removed", (data: { clerkId: string }) => {
-      console.log("[socket] collaborator-removed received:", data);
-      const activeUser = userRef.current;
-      console.log("[socket] activeUser.id:", activeUser?.id, "data.clerkId:", data.clerkId);
-      if (activeUser && activeUser.id === data.clerkId) {
-        console.log("[socket] Matching user! Evicting to dashboard.");
-        toast.error("Your access to this note has been revoked by the owner.");
-        router.push("/dashboard");
-      }
-    });
+      socket.on("ydoc-update", (updateData: number[]) => {
+        Y.applyUpdate(ydoc, new Uint8Array(updateData), "remote");
+      });
+    };
+
+    initSocket();
+
+      socket.on("awareness-update", (updateData: number[]) => {
+        awarenessProtocol.applyAwarenessUpdate(awareness, new Uint8Array(updateData), "remote");
+      });
+
+      // Listen to local awareness updates and broadcast them
+      awareness.on("update", ({ added, updated, removed }: any, origin: any) => {
+        if (origin !== "remote") {
+          const changedClients = added.concat(updated).concat(removed);
+          const update = awarenessProtocol.encodeAwarenessUpdate(awareness, changedClients);
+          socket!.emit("awareness-update", { noteId: note.id, update: Array.from(update) });
+        }
+      });
+
+      // Real-time: receive new comment from another user
+      socket.on("comment-added", (comment: CommentData) => {
+        setComments((prev) => {
+          if (prev.some((c) => c.id === comment.id)) return prev;
+          
+          if (!isCommentsPanelOpenRef.current) {
+            setTimeout(() => setUnreadCommentCount((c) => c + 1), 0);
+          }
+          
+          return [comment, ...prev];
+        });
+      });
+
+      // Real-time: receive resolved comment from another user
+      socket.on("comment-resolved", (commentId: string) => {
+        setComments((prev) => prev.filter((c) => c.id !== commentId));
+      });
+
+      // Real-time: receive collaborator role updates
+      socket.on("collaborator-role-updated", (data: { clerkId: string; role: "VIEW" | "COMMENT" | "EDIT" }) => {
+        console.log("[socket] collaborator-role-updated received:", data);
+        const activeUser = userRef.current;
+        console.log("[socket] activeUser.id:", activeUser?.id, "data.clerkId:", data.clerkId);
+        if (activeUser && activeUser.id === data.clerkId) {
+          console.log("[socket] Matching user! Updating local role to:", data.role);
+          setRole(data.role);
+          toast(`Your permission was updated to ${data.role} by the owner.`, {
+            icon: '🔒',
+          });
+        }
+      });
+
+      // Real-time: receive collaborator removal
+      socket.on("collaborator-removed", (data: { clerkId: string }) => {
+        console.log("[socket] collaborator-removed received:", data);
+        const activeUser = userRef.current;
+        console.log("[socket] activeUser.id:", activeUser?.id, "data.clerkId:", data.clerkId);
+        if (activeUser && activeUser.id === data.clerkId) {
+          console.log("[socket] Matching user! Evicting to dashboard.");
+          toast.error("Your access to this note has been revoked by the owner.");
+          router.push("/dashboard");
+        }
+      });
+    };
+
+    initSocket();
 
     return () => {
-      socket.emit("leave-note", note.id);
-      socket.disconnect();
+      if (socket) {
+        socket.emit("leave-note", note.id);
+        socket.disconnect();
+      }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id]);
@@ -547,25 +565,36 @@ export default function NoteEditorClient({
   // Load custom history on note change
   useEffect(() => {
     if (typeof window !== "undefined" && note.id) {
-      const saved = localStorage.getItem(`inkwell-history-${note.id}`);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed && Array.isArray(parsed.stack) && typeof parsed.currentIndex === "number") {
-            setCustomHistory(parsed);
-            return;
+      const loadLocalHistory = () => {
+        let saved = localStorage.getItem(`scribt-history-${note.id}`);
+        if (!saved) {
+          // Fallback migration
+          saved = localStorage.getItem(`inkwell-history-${note.id}`);
+          if (saved) {
+            localStorage.setItem(`scribt-history-${note.id}`, saved);
+            localStorage.removeItem(`inkwell-history-${note.id}`);
           }
-        } catch (e) {
-          console.error("Failed to parse history", e);
         }
-      }
-      const initialContent = note.content?.html || "";
-      const initialHistory = {
-        currentIndex: 0,
-        stack: [initialContent],
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed && Array.isArray(parsed.stack) && typeof parsed.currentIndex === "number") {
+              setCustomHistory(parsed);
+              return;
+            }
+          } catch (e) {
+            console.error("Failed to parse history", e);
+          }
+        }
+        const initialContent = note.content?.html || "";
+        const initialHistory = {
+          currentIndex: 0,
+          stack: [initialContent],
+        };
+        setCustomHistory(initialHistory);
+        localStorage.setItem(`scribt-history-${note.id}`, JSON.stringify(initialHistory));
       };
-      setCustomHistory(initialHistory);
-      localStorage.setItem(`inkwell-history-${note.id}`, JSON.stringify(initialHistory));
+      loadLocalHistory();
     }
   }, [note.id]);
 
@@ -1039,7 +1068,7 @@ export default function NoteEditorClient({
                 currentIndex: newIndex,
               };
               setCustomHistory(updatedHistory);
-              localStorage.setItem(`inkwell-history-${note.id}`, JSON.stringify(updatedHistory));
+              localStorage.setItem(`scribt-history-${note.id}`, JSON.stringify(updatedHistory));
               
               triggerAutoSave(headingTitleRef.current, content);
               return true;
@@ -1061,7 +1090,7 @@ export default function NoteEditorClient({
                 currentIndex: newIndex,
               };
               setCustomHistory(updatedHistory);
-              localStorage.setItem(`inkwell-history-${note.id}`, JSON.stringify(updatedHistory));
+              localStorage.setItem(`scribt-history-${note.id}`, JSON.stringify(updatedHistory));
               
               triggerAutoSave(headingTitleRef.current, content);
               return true;
@@ -1349,7 +1378,7 @@ export default function NoteEditorClient({
             stack: newStack,
           };
           setCustomHistory(updatedHistory);
-          localStorage.setItem(`inkwell-history-${note.id}`, JSON.stringify(updatedHistory));
+          localStorage.setItem(`scribt-history-${note.id}`, JSON.stringify(updatedHistory));
         }
       } catch (err) {
         setSaveStatus("Failed to save changes");
@@ -1372,7 +1401,7 @@ export default function NoteEditorClient({
         currentIndex: newIndex,
       };
       setCustomHistory(updatedHistory);
-      localStorage.setItem(`inkwell-history-${note.id}`, JSON.stringify(updatedHistory));
+      localStorage.setItem(`scribt-history-${note.id}`, JSON.stringify(updatedHistory));
       triggerAutoSave(headingTitleRef.current, content);
     }
     setContextMenuPos(null);
@@ -1390,7 +1419,7 @@ export default function NoteEditorClient({
         currentIndex: newIndex,
       };
       setCustomHistory(updatedHistory);
-      localStorage.setItem(`inkwell-history-${note.id}`, JSON.stringify(updatedHistory));
+      localStorage.setItem(`scribt-history-${note.id}`, JSON.stringify(updatedHistory));
       triggerAutoSave(headingTitleRef.current, content);
     }
     setContextMenuPos(null);
@@ -1484,6 +1513,9 @@ export default function NoteEditorClient({
       // Save user message to database
       await saveChatMessage(note.id, "USER", inputMsg);
 
+      // Get API Key from localStorage
+      const customApiKey = typeof window !== "undefined" ? localStorage.getItem("scribt-gemini-api-key") || "" : "";
+
       // Call Gemini Chat API
       const res = await fetch("/api/chat", {
         method: "POST",
@@ -1495,6 +1527,7 @@ export default function NoteEditorClient({
           message: inputMsg,
           noteText: editor?.getText() || "",
           history: chatMessages,
+          customApiKey,
         }),
       });
 
@@ -1555,6 +1588,9 @@ export default function NoteEditorClient({
     try {
       await saveChatMessage(note.id, "USER", prompt);
 
+      // Get API Key from localStorage
+      const customApiKey = typeof window !== "undefined" ? localStorage.getItem("scribt-gemini-api-key") || "" : "";
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: {
@@ -1565,6 +1601,7 @@ export default function NoteEditorClient({
           message: prompt,
           noteText: editor?.getText() || "",
           history: chatMessages,
+          customApiKey,
         }),
       });
 
@@ -1863,7 +1900,7 @@ export default function NoteEditorClient({
         }
       }
     }
-    return finalHtml;
+    return typeof window !== "undefined" ? DOMPurify.sanitize(finalHtml) : finalHtml;
   };
 
 

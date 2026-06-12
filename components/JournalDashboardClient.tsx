@@ -9,6 +9,7 @@ import Sidebar from "@/components/Sidebar";
 import BookLoad from "@/components/ui/book_load";
 import { UserButton } from "@clerk/nextjs";
 
+
 interface JournalEntryData {
   id: string;
   title: string | null;
@@ -130,7 +131,7 @@ export default function JournalDashboardClient({ userName, entries: initialEntri
         {/* TopNavBar */}
         <header className="flex justify-between items-center w-full px-lg h-24 bg-background z-30 shrink-0 border-b border-outline-variant/30">
           <div className="flex items-center gap-lg">
-            <h2 className="md:hidden font-headline-sm font-bold text-primary mr-md">Inkwell</h2>
+            <h2 className="md:hidden font-headline-sm font-bold text-primary mr-md">Scribt</h2>
             
             {/* Search Bar */}
             <div className="flex items-center relative w-80 group">
@@ -156,6 +157,9 @@ export default function JournalDashboardClient({ userName, entries: initialEntri
               <span className="material-symbols-outlined">add</span>
             </button>
             <span className="font-label-sm text-secondary hidden sm:inline-block">Logged in as <strong>{userName}</strong></span>
+            <button className="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors">
+              <span className="material-symbols-outlined">notifications</span>
+            </button>
             <div className="w-10 h-10 flex items-center justify-center">
               <UserButton />
             </div>

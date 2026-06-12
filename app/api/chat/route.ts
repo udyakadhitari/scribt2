@@ -1,18 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAndSyncUser } from "@/lib/user";
 import { prisma } from "@/lib/prisma";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
   try {
+    // Rate Limit (limit: 10 requests per minute)
+    const limitRes = rateLimit(req, { limit: 10, windowMs: 60 * 1000 });
+    if (!limitRes.success) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "X-RateLimit-Limit": limitRes.limit.toString(),
+            "X-RateLimit-Remaining": limitRes.remaining.toString(),
+            "X-RateLimit-Reset": limitRes.resetTime.toString(),
+          },
+        }
+      );
+    }
+
     const dbUser = await checkAndSyncUser();
     if (!dbUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { noteId, message, noteText, history } = await req.json();
+    const { noteId, message, noteText, history, customApiKey } = await req.json();
 
     if (!noteId || !message) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+    }
+
+    if (message.length > 5000) {
+      return NextResponse.json({ error: "Message too long (max 5000 characters)" }, { status: 400 });
+    }
+
+    if (noteText && noteText.length > 500000) {
+      return NextResponse.json({ error: "Note content too long for AI analysis (max 500000 characters)" }, { status: 400 });
+    }
+
+    if (history && history.length > 100) {
+      return NextResponse.json({ error: "Chat history too long (max 100 messages)" }, { status: 400 });
     }
 
     // Verify user owns the note
@@ -21,15 +50,23 @@ export async function POST(req: NextRequest) {
       include: { chapter: { include: { subject: true } } },
     });
 
-    if (!note || note.chapter.subject.ownerId !== dbUser.id) {
+    if (!note) {
+      return NextResponse.json({ error: "Note not found" }, { status: 404 });
+    }
+
+    const isOwner = note.chapter.subject.ownerId === dbUser.id;
+
+    if (!isOwner) {
       return NextResponse.json({ error: "Unauthorized access to note" }, { status: 403 });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
+    // Get API Key from request body or fallback to environment variables
+    const apiKey = (customApiKey || process.env.GEMINI_API_KEY || "").trim();
+
     if (!apiKey) {
       return NextResponse.json(
-        { error: "Gemini API key is not configured. Please set GEMINI_API_KEY in environment." },
-        { status: 500 }
+        { error: "Gemini API Key is not configured. Please configure your API key in settings or set GEMINI_API_KEY in your .env file." },
+        { status: 400 }
       );
     }
 
@@ -48,7 +85,7 @@ export async function POST(req: NextRequest) {
     });
 
     // System instruction for context
-    const systemPrompt = `You are a helpful AI assistant integrated inside Inkwell, a premium note-taking app. 
+    const systemPrompt = `You are a helpful AI assistant integrated inside Scribt, a premium note-taking app. 
 You assist the user in writing, proofreading, summarizing, formatting, explaining, or expanding their notes.
 Try to keep your responses concise, helpful, and beautifully formatted in markdown.
 
@@ -87,6 +124,6 @@ ${noteText || ""}
     return NextResponse.json({ text: modelText });
   } catch (error: any) {
     console.error("Chat API error:", error);
-    return NextResponse.json({ error: error.message || "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

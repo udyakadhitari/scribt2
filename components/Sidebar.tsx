@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import Logo from "@/components/Logo";
 
 interface SidebarProps {
   activeRoute: string; // e.g. "/dashboard", "/whiteboard", "/journal", "/settings"
@@ -47,14 +48,10 @@ export default function Sidebar({
   return (
     <nav className="bg-surface-container-lowest w-[280px] h-screen hidden md:flex flex-col border-r border-outline-variant fixed left-0 top-0 bottom-0 z-40 select-none">
       {/* Brand Header */}
-      <div className="p-lg flex items-center gap-sm">
-        <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-on-primary shadow-sm">
-          <span className="material-symbols-outlined font-bold text-[20px]">ink_pen</span>
-        </div>
-        <div>
-          <h1 className="font-headline-sm text-primary font-bold">Inkwell</h1>
-          <p className="font-label-sm text-secondary">Technical Workspace</p>
-        </div>
+      <div className="p-4 flex items-center justify-center w-full">
+        <Link href="/dashboard" className="outline-none flex justify-center">
+          <Logo className="h-30 w-auto hover:opacity-90 transition-opacity" />
+        </Link>
       </div>
 
       {/* Navigation Links */}
@@ -102,7 +99,7 @@ export default function Sidebar({
             <Link
               href={`/subject/${activeSubject.id}`}
               className={`flex items-center gap-md pl-6 pr-md py-2 rounded-full outline-none focus:outline-none transition-colors duration-200 ${
-                activeRoute.startsWith("/subject/") || activeRoute.startsWith("/editor/") || activeRoute.startsWith("/note/")
+                activeRoute.startsWith("/subject/") || activeRoute.startsWith("/note/")
                   ? "text-primary font-bold bg-surface-container-low"
                   : "text-secondary hover:text-on-surface hover:bg-surface-container-low"
               }`}

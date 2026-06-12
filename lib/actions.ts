@@ -7,6 +7,9 @@ import { generateSecureToken } from "./share";
 import { Permission } from "@prisma/client";
 
 export async function createSubject(title: string, color?: string) {
+  if (title?.length > 255) throw new Error("Title too long (max 255 characters)");
+  if (color && color.length > 50) throw new Error("Color value too long");
+
   const dbUser = await checkAndSyncUser();
   if (!dbUser) throw new Error("Unauthorized");
 
@@ -23,6 +26,8 @@ export async function createSubject(title: string, color?: string) {
 }
 
 export async function createChapter(subjectId: string, title: string) {
+  if (title?.length > 255) throw new Error("Title too long (max 255 characters)");
+
   const dbUser = await checkAndSyncUser();
   if (!dbUser) throw new Error("Unauthorized");
 
@@ -54,6 +59,8 @@ export async function createChapter(subjectId: string, title: string) {
 }
 
 export async function createNote(chapterId: string, title: string) {
+  if (title?.length > 255) throw new Error("Title too long (max 255 characters)");
+
   const dbUser = await checkAndSyncUser();
   if (!dbUser) throw new Error("Unauthorized");
 
@@ -80,6 +87,9 @@ export async function createNote(chapterId: string, title: string) {
 }
 
 export async function updateNoteContent(noteId: string, title: string, content: any) {
+  if (title?.length > 255) throw new Error("Title too long (max 255 characters)");
+  if (content && JSON.stringify(content).length > 5 * 1024 * 1024) throw new Error("Content too large (max 5MB)");
+
   const dbUser = await checkAndSyncUser();
   if (!dbUser) throw new Error("Unauthorized");
 
@@ -177,6 +187,8 @@ export async function deleteChapter(chapterId: string) {
 }
 
 export async function updateChapter(chapterId: string, title: string) {
+  if (title?.length > 255) throw new Error("Title too long (max 255 characters)");
+
   const dbUser = await checkAndSyncUser();
   if (!dbUser) throw new Error("Unauthorized");
 
@@ -244,6 +256,13 @@ export async function saveChatMessage(noteId: string, role: "USER" | "ASSISTANT"
 }
 
 export async function checkGrammar(text: string) {
+  const dbUser = await checkAndSyncUser();
+  if (!dbUser) throw new Error("Unauthorized");
+  
+  if (!text || text.length > 20000) {
+    throw new Error("Text too long or empty (max 20000 characters)");
+  }
+
   try {
     const params = new URLSearchParams();
     params.append("text", text);
@@ -265,7 +284,7 @@ export async function checkGrammar(text: string) {
     return data.matches || [];
   } catch (err: any) {
     console.error("Grammar check error:", err);
-    throw err;
+    throw new Error("Failed to check grammar");
   }
 }
 
@@ -329,8 +348,14 @@ export async function updateJournalEntry(id: string, data: { title?: string; con
   }
 
   const updateData: any = {};
-  if (data.title !== undefined) updateData.title = data.title;
-  if (data.content !== undefined) updateData.content = data.content;
+  if (data.title !== undefined) {
+    if (data.title.length > 255) throw new Error("Title too long");
+    updateData.title = data.title;
+  }
+  if (data.content !== undefined) {
+    if (JSON.stringify(data.content).length > 5 * 1024 * 1024) throw new Error("Content too large");
+    updateData.content = data.content;
+  }
   if (data.mood !== undefined) updateData.mood = data.mood;
   if (data.date !== undefined) {
     const entryDate = new Date(data.date);
@@ -372,6 +397,8 @@ export async function deleteJournalEntry(id: string) {
 }
 
 export async function updateSubject(subjectId: string, title: string) {
+  if (title?.length > 255) throw new Error("Title too long (max 255 characters)");
+
   const dbUser = await checkAndSyncUser();
   if (!dbUser) throw new Error("Unauthorized");
 
@@ -491,6 +518,7 @@ export async function addCollaborator(noteId: string, userId: string, role: Perm
     include: { chapter: { include: { subject: true } } },
   });
   if (!note) throw new Error("Note not found");
+  if (note.chapter.subject.ownerId !== dbUser.id) throw new Error("Unauthorized");
 
   // Check if collaborator already exists
   const existing = await prisma.collaborator.findFirst({
@@ -515,6 +543,19 @@ export async function addCollaborator(noteId: string, userId: string, role: Perm
 }
 
 export async function getCollaborators(noteId: string) {
+  const dbUser = await checkAndSyncUser();
+  if (!dbUser) throw new Error("Unauthorized");
+
+  const note = await prisma.note.findUnique({
+    where: { id: noteId },
+    include: { chapter: { include: { subject: true } } },
+  });
+  if (!note) throw new Error("Note not found");
+
+  const isOwner = note.chapter.subject.ownerId === dbUser.id;
+  const isCollab = await prisma.collaborator.findFirst({ where: { userId: dbUser.id, noteId } });
+  if (!isOwner && !isCollab) throw new Error("Unauthorized");
+
   return await prisma.collaborator.findMany({
     where: { noteId },
     include: { user: true },
@@ -523,6 +564,19 @@ export async function getCollaborators(noteId: string) {
 }
 
 export async function getComments(noteId: string) {
+  const dbUser = await checkAndSyncUser();
+  if (!dbUser) throw new Error("Unauthorized");
+
+  const note = await prisma.note.findUnique({
+    where: { id: noteId },
+    include: { chapter: { include: { subject: true } } },
+  });
+  if (!note) throw new Error("Note not found");
+
+  const isOwner = note.chapter.subject.ownerId === dbUser.id;
+  const isCollab = await prisma.collaborator.findFirst({ where: { userId: dbUser.id, noteId } });
+  if (!isOwner && !isCollab) throw new Error("Unauthorized");
+
   return await prisma.comment.findMany({
     where: { noteId, resolved: false },
     include: { user: true },
@@ -554,7 +608,7 @@ export async function addComment(noteId: string, content: string) {
     data: {
       noteId,
       userId: dbUser.id,
-      content,
+      content: content.length > 5000 ? content.substring(0, 5000) : content,
     },
     include: {
       user: true,

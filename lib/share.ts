@@ -1,8 +1,8 @@
-import CryptoJS from "crypto-js";
+import crypto from "crypto";
 
 /**
- * Generates a secure, random 32-character hex token using crypto-js.
+ * Generates a secure, random 32-character hex token using Node's crypto.randomBytes.
  */
 export function generateSecureToken(): string {
-  return CryptoJS.lib.WordArray.random(16).toString(CryptoJS.enc.Hex);
+  return crypto.randomBytes(16).toString("hex");
 }

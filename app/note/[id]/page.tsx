@@ -69,7 +69,6 @@ export default async function NotePage({ params }: PageProps) {
       createdAt: "desc",
     },
   });
-console.log("NOTE CONTENT:", note.content);
   // Convert prisma note object to ensure serializable fields if needed
   return (
     <NoteEditorClient

@@ -1,12 +1,30 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import Sidebar from "@/components/Sidebar";
 
+import toast from "react-hot-toast";
+
 export default function SettingsPage() {
   const [apiKey, setApiKey] = useState("");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("scribt-gemini-api-key") || "";
+      setApiKey(saved);
+    }
+  }, []);
+
+  const handleSaveKey = () => {
+    try {
+      localStorage.setItem("scribt-gemini-api-key", apiKey.trim());
+      toast.success("Gemini API Key saved successfully!");
+    } catch (err) {
+      toast.error("Failed to save API Key");
+    }
+  };
 
   return (
     <div className="bg-background text-on-background font-body-md h-screen flex overflow-hidden selection:bg-primary-container selection:text-on-primary-container">
@@ -20,7 +38,7 @@ export default function SettingsPage() {
         {/* TopNavBar */}
         <header className="flex justify-between items-center w-full px-lg h-24 bg-background z-30 shrink-0">
           <div className="flex items-center gap-lg">
-            <h2 className="md:hidden font-headline-sm font-bold text-primary">Inkwell</h2>
+            <h2 className="md:hidden font-headline-sm font-bold text-primary">Scribt</h2>
             <div className="flex items-center gap-sm text-secondary font-body-md text-body-md">
               <span className="material-symbols-outlined text-[18px]">settings</span>
               <span className="text-on-surface font-semibold">Settings</span>
@@ -29,9 +47,8 @@ export default function SettingsPage() {
 
           {/* Trailing Actions */}
           <div className="flex items-center gap-sm md:gap-md">
-            <button className="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors relative">
+            <button className="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors">
               <span className="material-symbols-outlined">notifications</span>
-              <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-background"></span>
             </button>
             <div className="w-10 h-10 flex items-center justify-center">
               <UserButton />
@@ -51,17 +68,13 @@ export default function SettingsPage() {
             
             {/* Card for API Keys */}
             <div className="bg-surface-container-lowest border border-outline-variant rounded-3xl p-lg shadow-ambient-raised flex flex-col gap-md relative overflow-hidden">
-              <div className="absolute top-4 right-4 bg-secondary/10 text-secondary text-[11px] font-bold px-3 py-1 rounded-full uppercase tracking-wider">
-                Coming Soon
-              </div>
-
               <div>
                 <h3 className="font-headline-sm text-primary font-bold flex items-center gap-xs">
                   <span className="material-symbols-outlined fill">key</span>
                   AI Integration Keys
                 </h3>
                 <p className="text-sm text-secondary mt-1">
-                  Configure custom API keys to power your AI insight generator. By default, Inkwell runs on the host-configured system keys.
+                  Configure your custom Google Gemini API Key. AI features will only run if a valid key is provided.
                 </p>
               </div>
 
@@ -69,21 +82,23 @@ export default function SettingsPage() {
 
               <div className="flex flex-col gap-sm">
                 <label className="font-label-md text-on-surface font-semibold">Google Gemini API Key</label>
-                <div className="relative">
+                <div className="relative flex gap-sm">
                   <input
                     type="password"
                     placeholder="Enter your Gemini API key (e.g. AIzaSy...)"
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    disabled
-                    className="w-full h-12 pl-md pr-12 rounded-xl bg-surface-container-low border border-outline-variant outline-none text-on-surface opacity-60 cursor-not-allowed placeholder:text-outline"
+                    className="flex-grow h-12 px-md rounded-xl bg-surface-container-low border border-outline-variant outline-none text-on-surface placeholder:text-outline"
                   />
-                  <span className="material-symbols-outlined absolute right-4 top-3 text-secondary">
-                    lock
-                  </span>
+                  <button
+                    onClick={handleSaveKey}
+                    className="bg-primary text-on-primary rounded-xl px-6 h-12 font-label-md hover:bg-surface-tint transition-all cursor-pointer border-0"
+                  >
+                    Save Key
+                  </button>
                 </div>
                 <p className="text-xs text-outline">
-                  Custom key configuration is currently locked. Inkwell is currently running on the server-provided default Gemini API keys.
+                  Your API key is stored safely inside your local browser storage and is forwarded directly to the Gemini API endpoint.
                 </p>
               </div>
             </div>

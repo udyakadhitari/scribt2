@@ -28,17 +28,8 @@ export async function checkAndSyncUser() {
 
     return dbUser;
   } catch (err) {
-    console.error("Database connection failed, using Clerk user as fallback:", err);
-    const fullName = `${clerkUser.firstName ?? ""} ${clerkUser.lastName ?? ""}`.trim();
-    return {
-      id: "fallback-id",
-      clerkId: clerkUser.id,
-      email: email,
-      name: fullName || null,
-      imageUrl: clerkUser.imageUrl || null,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    };
+    console.error("Database connection failed in checkAndSyncUser:", err);
+    return null;
   }
 }
 

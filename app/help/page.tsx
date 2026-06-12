@@ -5,6 +5,7 @@ import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import Sidebar from "@/components/Sidebar";
 
+
 export default function HelpPage() {
   const [activeTab, setActiveTab] = useState("all");
 
@@ -93,15 +94,17 @@ export default function HelpPage() {
         {/* TopNavBar */}
         <header className="flex justify-between items-center w-full px-lg h-24 bg-background z-30 shrink-0">
           <div className="flex items-center gap-lg">
-            <h2 className="md:hidden font-headline-sm font-bold text-primary">Inkwell</h2>
+            <h2 className="md:hidden font-headline-sm font-bold text-primary">Scribt</h2>
             <div className="flex items-center gap-sm text-secondary font-body-md text-body-md">
               <span className="material-symbols-outlined text-[18px]">help_outline</span>
               <span className="text-on-surface font-semibold">Help & Documentation</span>
             </div>
           </div>
 
-          {/* Trailing Actions */}
           <div className="flex items-center gap-sm md:gap-md">
+            <button className="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors">
+              <span className="material-symbols-outlined">notifications</span>
+            </button>
             <div className="w-10 h-10 flex items-center justify-center">
               <UserButton />
             </div>

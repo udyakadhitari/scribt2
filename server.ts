@@ -5,6 +5,8 @@ import { Server as SocketIOServer } from "socket.io";
 import * as Y from "yjs";
 import { Awareness } from "y-protocols/awareness";
 import * as awarenessProtocol from "y-protocols/awareness";
+import { verifyToken } from "@clerk/nextjs/server";
+import { prisma } from "./lib/prisma";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "localhost";
@@ -27,7 +29,7 @@ app.prepare().then(() => {
 
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: "*",
+      origin: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
       methods: ["GET", "POST"],
     },
     path: "/api/socketio",
@@ -38,13 +40,61 @@ app.prepare().then(() => {
 
   const activeDocs = new Map<string, { ydoc: Y.Doc; awareness: Awareness }>();
 
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth.token;
+      if (!token) {
+        return next(new Error("Authentication error: No token provided"));
+      }
+      
+      const jwtPayload = await verifyToken(token, {
+        secretKey: process.env.CLERK_SECRET_KEY,
+      });
+      
+      if (!jwtPayload) {
+        return next(new Error("Authentication error: Invalid token"));
+      }
+      
+      (socket as any).userId = jwtPayload.sub;
+      next();
+    } catch (err) {
+      console.error("[socket.io] auth error:", err);
+      next(new Error("Authentication error"));
+    }
+  });
+
   io.on("connection", (socket) => {
-    console.log(`[socket.io] Client connected: ${socket.id}`);
+    console.log(`[socket.io] Client connected: ${socket.id}, User: ${(socket as any).userId}`);
 
     // Join a note room
-    socket.on("join-note", (noteId: string) => {
-      socket.join(`note:${noteId}`);
-      console.log(`[socket.io] ${socket.id} joined note:${noteId}`);
+    socket.on("join-note", async (noteId: string) => {
+      const userId = (socket as any).userId;
+      
+      try {
+        const note = await prisma.note.findUnique({
+          where: { id: noteId },
+          include: { chapter: { include: { subject: true } } },
+        });
+
+        if (!note) {
+          console.log(`[socket.io] Note ${noteId} not found`);
+          return;
+        }
+
+        const isOwner = note.chapter.subject.ownerId === userId;
+        const isCollab = await prisma.collaborator.findFirst({
+          where: { userId, noteId },
+        });
+
+        if (isOwner || isCollab) {
+          socket.join(`note:${noteId}`);
+          console.log(`[socket.io] User ${userId} joined note:${noteId}`);
+        } else {
+          console.log(`[socket.io] User ${userId} denied access to note:${noteId}`);
+        }
+      } catch (err) {
+        console.error(`[socket.io] Error in join-note:`, err);
+      }
     });
 
     // Sync Room document and awareness state

@@ -23,7 +23,7 @@ const sacramento = Sacramento({
 });
 
 export const metadata: Metadata = {
-  title: "Inkwell - Write with clarity.",
+  title: "Scribt - Write with clarity.",
   description: "A technical workspace that breathes. Focus on your thoughts, undisturbed by clutter, in an environment designed for quiet luxury and deep work.",
 };
 

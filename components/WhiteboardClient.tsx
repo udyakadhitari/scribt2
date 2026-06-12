@@ -45,7 +45,15 @@ export default function WhiteboardClient({ userName }: WhiteboardClientProps) {
   useEffect(() => {
     if (typeof window !== "undefined") {
       try {
-        const saved = localStorage.getItem("inkwell-excalidraw-scene");
+        let saved = localStorage.getItem("scribt-excalidraw-scene");
+        if (!saved) {
+          // Auto-migrate from old Inkwell key
+          saved = localStorage.getItem("inkwell-excalidraw-scene");
+          if (saved) {
+            localStorage.setItem("scribt-excalidraw-scene", saved);
+            localStorage.removeItem("inkwell-excalidraw-scene");
+          }
+        }
         if (saved) {
           const parsed = JSON.parse(saved);
           setInitialData({
@@ -72,7 +80,7 @@ export default function WhiteboardClient({ userName }: WhiteboardClientProps) {
     const existing = (window as any).__excalidrawSaveTimeout;
     if (existing) clearTimeout(existing);
     (window as any).__excalidrawSaveTimeout = setTimeout(() => {
-      try { localStorage.setItem("inkwell-excalidraw-scene", JSON.stringify(dataToSave)); }
+      try { localStorage.setItem("scribt-excalidraw-scene", JSON.stringify(dataToSave)); }
       catch (e) { console.error(e); }
     }, 1000);
   }, []);
@@ -188,7 +196,7 @@ export default function WhiteboardClient({ userName }: WhiteboardClientProps) {
   // ── Other header actions ───────────────────────────────────────────────────
   const handleClear = () => {
     excalidrawAPIRef.current?.updateScene({ elements: [] });
-    localStorage.removeItem("inkwell-excalidraw-scene");
+    localStorage.removeItem("scribt-excalidraw-scene");
     toast.success("Canvas cleared!");
   };
   const handleUndo = () => excalidrawAPIRef.current?.history?.undo();
@@ -207,7 +215,7 @@ export default function WhiteboardClient({ userName }: WhiteboardClientProps) {
         if (!api) return;
         if (parsed.type === "excalidraw" || parsed.elements) {
           api.updateScene({ elements: parsed.elements || [], appState: { ...(parsed.appState || {}), theme: "light" } });
-          localStorage.setItem("inkwell-excalidraw-scene", JSON.stringify(parsed));
+          localStorage.setItem("scribt-excalidraw-scene", JSON.stringify(parsed));
           toast.success("Scene imported!");
         } else { toast.error("Unrecognised file format."); }
       } catch { toast.error("Failed to read file."); }

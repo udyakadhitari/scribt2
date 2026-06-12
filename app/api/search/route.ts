@@ -1,9 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAndSyncUser } from "@/lib/user";
 import { prisma } from "@/lib/prisma";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(req: NextRequest) {
   try {
+    // Rate Limit (limit: 30 requests per minute)
+    const limitRes = rateLimit(req, { limit: 30, windowMs: 60 * 1000 });
+    if (!limitRes.success) {
+      return NextResponse.json(
+        { error: "Too many requests. Please try again later." },
+        {
+          status: 429,
+          headers: {
+            "X-RateLimit-Limit": limitRes.limit.toString(),
+            "X-RateLimit-Remaining": limitRes.remaining.toString(),
+            "X-RateLimit-Reset": limitRes.resetTime.toString(),
+          },
+        }
+      );
+    }
     const dbUser = await checkAndSyncUser();
     if (!dbUser) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -168,6 +184,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: any) {
     console.error("API search error:", error);
-    return NextResponse.json({ error: error.message || "Internal Server Error" }, { status: 500 });
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

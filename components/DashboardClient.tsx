@@ -9,6 +9,7 @@ import toast from "react-hot-toast";
 import Sidebar from "@/components/Sidebar";
 import BookLoad from "@/components/ui/book_load";
 
+
 interface SubjectData {
   id: string;
   title: string;
@@ -276,7 +277,7 @@ export default function DashboardClient({
         {/* TopNavBar */}
         <header className="flex justify-between items-center w-full px-lg h-24 bg-background z-30 shrink-0">
           <div className="flex items-center gap-lg">
-            <h2 className="md:hidden font-headline-sm font-bold text-primary">Inkwell</h2>
+            <h2 className="md:hidden font-headline-sm font-bold text-primary">Scribt</h2>
             {/* Search Bar Container */}
             <div className="hidden md:block relative w-96 search-container">
               <form
@@ -430,9 +431,8 @@ export default function DashboardClient({
               />
             </form>
             
-            <button className="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors relative">
+            <button className="w-10 h-10 flex items-center justify-center text-secondary hover:text-primary rounded-full hover:bg-surface-container transition-colors">
               <span className="material-symbols-outlined">notifications</span>
-              <span className="absolute top-2 right-2 w-2 h-2 bg-error rounded-full border-2 border-background"></span>
             </button>
             
             <div className="w-10 h-10 flex items-center justify-center">
