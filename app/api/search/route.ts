@@ -134,15 +134,15 @@ export async function GET(req: NextRequest) {
 
 
     // Format the response to match the frontend expected schemas
-    const formattedSubjects = subjects.map((subj) => {
-      const totalNotes = subj.chapters.reduce((sum, chap) => sum + chap.notes.length, 0);
+    const formattedSubjects = subjects.map((subj: any) => {
+      const totalNotes = subj.chapters.reduce((sum: number, chap: any) => sum + chap.notes.length, 0);
       
       let latestUpdate = new Date(subj.updatedAt);
-      subj.chapters.forEach((chap) => {
+      subj.chapters.forEach((chap: any) => {
         const chapUpdate = new Date(chap.updatedAt);
         if (chapUpdate > latestUpdate) latestUpdate = chapUpdate;
         
-        chap.notes.forEach((note) => {
+        chap.notes.forEach((note: any) => {
           const noteUpdate = new Date(note.updatedAt);
           if (noteUpdate > latestUpdate) latestUpdate = noteUpdate;
         });
@@ -158,9 +158,9 @@ export async function GET(req: NextRequest) {
     });
 
     // Sort subjects by latest dynamic update
-    formattedSubjects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    formattedSubjects.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
-    const formattedNotes = notes.map((note) => ({
+    const formattedNotes = notes.map((note: any) => ({
       id: note.id,
       title: note.title,
       subjectId: note.chapter.subject.id,
@@ -170,7 +170,7 @@ export async function GET(req: NextRequest) {
       updatedAt: note.updatedAt.toISOString(),
     }));
 
-    const formattedChapters = chapters.map((chap) => ({
+    const formattedChapters = chapters.map((chap: any) => ({
       id: chap.id,
       title: chap.title,
       subjectId: chap.subject.id,
