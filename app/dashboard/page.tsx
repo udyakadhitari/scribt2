@@ -50,15 +50,15 @@ export default async function DashboardPage(props: { searchParams: Promise<{ tab
   });
 
   // Map database entries to the format expected by our clean client dashboard
-  const formattedSubjects = subjects.map((subj) => {
-    const totalNotes = subj.chapters.reduce((sum, chap) => sum + chap.notes.length, 0);
+  const formattedSubjects = subjects.map((subj: any) => {
+    const totalNotes = subj.chapters.reduce((sum: number, chap: any) => sum + chap.notes.length, 0);
 
     let latestUpdate = new Date(subj.updatedAt);
-    subj.chapters.forEach((chap) => {
+    subj.chapters.forEach((chap: any) => {
       const chapUpdate = new Date(chap.updatedAt);
       if (chapUpdate > latestUpdate) latestUpdate = chapUpdate;
 
-      chap.notes.forEach((note) => {
+      chap.notes.forEach((note: any) => {
         const noteUpdate = new Date(note.updatedAt);
         if (noteUpdate > latestUpdate) latestUpdate = noteUpdate;
       });
@@ -74,9 +74,9 @@ export default async function DashboardPage(props: { searchParams: Promise<{ tab
   });
 
   // Sort subjects by latest dynamic update
-  formattedSubjects.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  formattedSubjects.sort((a: any, b: any) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
-  const formattedNotes = recentNotes.map((note) => ({
+  const formattedNotes = recentNotes.map((note: any) => ({
     id: note.id,
     title: note.title,
     subjectId: note.chapter.subject.id,
