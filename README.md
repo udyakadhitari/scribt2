@@ -2,6 +2,8 @@
 
 Scribt is a modern, collaborative note-taking and workspace platform designed to help teams and individuals think, plan, and track in real-time. It integrates collaborative text editing, infinite whiteboards, daily journaling, AI-assisted workflows, and robust security controls within a premium, visual interface.
 
+**🔗 Live Demo**: [scribt2-vercel.app](https://scribt2-2k0cdvehx-doctorstrangeonwork-6177s-projects.vercel.app/)
+
 ---
 
 ## ✨ Features
